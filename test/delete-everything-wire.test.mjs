@@ -6,7 +6,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { isDeleteEverythingConfirm } from '../lib/api/admin.ts';
+import { isDeleteEverythingConfirm, notConfiguredBody } from '../lib/api/admin.ts';
 
 describe('delete-everything typed confirm (F-F)', () => {
   it('accepts exactly {confirm:"DELETE"}', () => {
@@ -29,4 +29,13 @@ describe('delete-everything typed confirm (F-F)', () => {
       assert.equal(isDeleteEverythingConfirm(body), false);
     });
   }
+});
+
+describe('health not_configured payload (F-H)', () => {
+  it('returns status not_configured with the clear setup message', () => {
+    const b = notConfiguredBody();
+    assert.equal(b.status, 'not_configured');
+    assert.match(b.message, /DATABASE_URL is not set/);
+    assert.match(b.message, /\.env\.example/);
+  });
 });

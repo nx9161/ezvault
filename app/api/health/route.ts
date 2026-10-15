@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { handle, ok } from '@/lib/api/route-utils';
+import { notConfiguredBody } from '@/lib/api/admin';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -40,8 +41,20 @@ async function probeCodecs(): Promise<CodecStatus[]> {
 /**
  * GET /api/health — neon / r2 / queue / codec status.
  * 200 when the service can serve; 503 when a hard dependency is down.
+ *
+ * F-H: when DATABASE_URL is missing the app is not configured yet —
+ * return 503 with {"status":"not_configured"} plus the clear setup
+ * message (kept verbatim from lib/db/index.ts) so the deploy smoke test
+ * can distinguish "not configured" from "configured but broken".
  */
 export const GET = handle(async () => {
+  if (!process.env['DATABASE_URL']) {
+    return new Response(JSON.stringify(notConfiguredBody()), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   const checks: Record<string, { status: string; detail?: string }> = {};
 
   // Neon (hard dependency).
