@@ -14,14 +14,13 @@
  * under test — keep it in sync with the source above.
  *
  * What the Playwright e2e asserts (and this test locks at the DB layer):
- *   10-concurrent burst at POST /api/admin/delete-everything
- *   (bucket capacity 3, limiter runs before body validation — safe: bad
- *   bodies 400 without deleting) → the overflow gets 429 + Retry-After,
- *   zero 500s. The 429 + Retry-After header mapping lives in
- *   lib/api/route-utils.ts handle() (HttpError.retryAfterSec → header);
- *   the concurrency property (no deadlocks, exact accounting) is what this
- *   file proves: N concurrent consumes on one bucket row → exactly
- *   `capacity` allowed, the rest denied, zero query errors.
+ *   40-concurrent burst at POST /api/import/presign
+ *   (bucket `import:presign`, capacity 30, refill 0.5/s) → the overflow
+ *   gets 429 + Retry-After, zero 500s. The 429 + Retry-After header mapping
+ *   lives in lib/api/route-utils.ts handle() (HttpError.retryAfterSec →
+ *   header); the concurrency property (no deadlocks, exact accounting) is
+ *   what this file proves: N concurrent consumes on one bucket row →
+ *   exactly `capacity` allowed, the rest denied, zero query errors.
  *
  * Determinism note: the burst bucket is pre-created with refill_per_sec=0
  * so wall-clock refill cannot grant phantom tokens mid-burst. The refill

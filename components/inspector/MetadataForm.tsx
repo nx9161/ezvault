@@ -18,6 +18,7 @@ import {
 import { ErrorCard, SkeletonRows } from "@/components/ui/Feedback";
 import type { MetadataValuesMap, UiTemplate, UiTemplateField } from "@/lib/api/types";
 import { adaptMetadataValues } from "@/lib/api/types";
+import { isValidPartialDate } from "@/lib/validation";
 
 function fieldLabel(field: UiTemplateField, locale: string): string {
   return field.label_i18n?.[locale] ?? field.label;
@@ -69,6 +70,8 @@ function FieldInput({
   const id = `ez-field-${field.id}`;
   const label = fieldLabel(field, "en");
   const required = isRightsField(field) || field.required;
+  // SHOULD-30: date fields validate on blur (YYYY / YYYY-MM / YYYY-MM-DD).
+  const [dateError, setDateError] = useState(false);
   const common = {
     id,
     value,
@@ -97,6 +100,16 @@ function FieldInput({
           type="text"
           placeholder={inputPlaceholder ?? "YYYY-MM-DD"}
           {...common}
+          aria-invalid={invalid || dateError || undefined}
+          aria-describedby={
+            describedBy ??
+            (invalid ? `${id}-error` : dateError ? `${id}-date-error` : undefined)
+          }
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+            if (dateError) setDateError(false);
+            onChange(e.target.value);
+          }}
+          onBlur={() => setDateError(!isValidPartialDate(value))}
         />
       ) : field.widget === "boolean" ? (
         <input
@@ -139,6 +152,11 @@ function FieldInput({
       {invalid ? (
         <span className="ez-error" id={`${id}-error`} role="alert">
           {t("rightsRequired")}
+        </span>
+      ) : null}
+      {dateError ? (
+        <span className="ez-error" id={`${id}-date-error`} role="alert">
+          {t("dateInvalid")}
         </span>
       ) : null}
     </div>
