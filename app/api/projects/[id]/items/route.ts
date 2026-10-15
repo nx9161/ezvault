@@ -12,6 +12,9 @@ type Ctx = { params: Promise<{ id: string }> };
 const SORTS: Record<string, string> = {
   created: 's.created_at DESC',
   created_asc: 's.created_at ASC',
+  // F-A: user-visible list order. Only valid when the ?list= filter is
+  // present (li is only joined then); degrades to created otherwise.
+  list_position: 'li.position ASC',
 };
 
 export const GET = handle(async (req: Request, ctx: Ctx) => {
@@ -22,8 +25,11 @@ export const GET = handle(async (req: Request, ctx: Ctx) => {
   const listId = url.searchParams.get('list');
   const tagId = url.searchParams.get('tag');
   const q = url.searchParams.get('q')?.trim() ?? '';
-  const sortKey = url.searchParams.get('sort') ?? 'created';
-  const sort = SORTS[sortKey] ?? SORTS['created'];
+  // F-A: when viewing a single list with no explicit sort, default to the
+  // persisted list order so a reload shows the same arrangement.
+  const sortParam = url.searchParams.get('sort');
+  const sortKey = sortParam ?? (listId ? 'list_position' : 'created');
+  const sort = sortKey === 'list_position' && !listId ? SORTS['created'] : (SORTS[sortKey] ?? SORTS['created']);
 
   // Dynamically-built but fully parameterized: user input only via $n params.
   const params: unknown[] = [id];
@@ -61,10 +67,11 @@ export const GET = handle(async (req: Request, ctx: Ctx) => {
 
   const rows = await queryRaw(
     `SELECT s.id AS subject_id, s.template_id, s.created_at, s.updated_at,
+            ${listId ? 'li.position AS position,' : ''}
             COUNT(DISTINCT p.subject_id)::int AS photo_count,
             COUNT(DISTINCT sel.subject_id)::int AS selection_count,
             COUNT(DISTINCT n.id)::int AS note_count
-     ${base} GROUP BY s.id, s.template_id, s.created_at, s.updated_at
+     ${base} GROUP BY s.id, s.template_id, s.created_at, s.updated_at${listId ? ', li.position' : ''}
      ORDER BY ${sort} LIMIT $${p} OFFSET $${p + 1}`,
     [...params, limit, offset],
   );
