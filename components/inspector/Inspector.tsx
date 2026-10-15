@@ -37,7 +37,7 @@ function PhotoStrip({
   if (photos.length <= 1) return null;
   return (
     <div
-      style={{ display: "flex", gap: 6, marginTop: 8, overflowX: "auto", paddingBottom: 4 }}
+      style={{ display: "flex", gap: 8, marginTop: 8, overflowX: "auto", paddingBottom: 4 }}
       role="tablist"
       aria-label="photos"
     >

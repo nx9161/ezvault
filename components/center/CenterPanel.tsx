@@ -669,7 +669,7 @@ function SearchResults({ projectId }: { projectId: string }) {
 
   return (
     <div className="ez-grid-scroll" id="ez-grid" tabIndex={-1} aria-label={t("resultsFor", { query: activeQuery })}>
-      <div className="ez-center-head" style={{ padding: "0 0 12px", border: 0 }}>
+      <div className="ez-center-head ez-center-head--bare">
         <h2 style={{ fontSize: 16, margin: 0 }}>{t("resultsFor", { query: activeQuery })}</h2>
         <span className="ez-spacer" />
         <label style={{ fontSize: 12, color: "var(--ink-2)" }}>

@@ -250,7 +250,7 @@ export default function StorageDialog({ projectId }: { projectId: string }) {
           ))}
 
           {mode === "flagged-only" ? (
-            <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 8, marginTop: 4 }}>
+            <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12, marginTop: 4 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                 <strong style={{ fontSize: 13 }}>
                   {t("flaggedPickTitle")} ({selected.size})
@@ -280,7 +280,7 @@ export default function StorageDialog({ projectId }: { projectId: string }) {
                 <ul style={{ listStyle: "none", margin: 0, padding: 0, maxHeight: 180, overflowY: "auto", fontSize: 12 }}>
                   {photos.map((p) => (
                     <li key={p.id}>
-                      <label style={{ display: "flex", gap: 6, alignItems: "center", padding: "2px 0" }}>
+                      <label className="ez-check-label" style={{ padding: "2px 0" }}>
                         <input
                           type="checkbox"
                           checked={selected.has(p.id)}

@@ -105,7 +105,7 @@ export default function NotesPanel({
         ) : null}
       </div>
       <div style={{ display: "flex", gap: 12, marginBottom: 8, fontSize: 12 }}>
-        <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+        <label className="ez-check-label">
           <input
             type="checkbox"
             checked={vertical}
@@ -113,7 +113,7 @@ export default function NotesPanel({
           />
           {t("verticalWriting")}
         </label>
-        <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+        <label className="ez-check-label">
           <input
             type="checkbox"
             checked={lineNumbers}

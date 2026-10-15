@@ -302,7 +302,7 @@ export default function MetadataForm({
           <summary>
             {t("unmapped")} ({otherEntries.length})
           </summary>
-          <div style={{ padding: "0 12px 12px" }}>
+          <div className="ez-collapsible-body">
             {otherEntries.map(([uri, v]) => (
               <div className="ez-field" key={uri}>
                 <label>{uri}</label>

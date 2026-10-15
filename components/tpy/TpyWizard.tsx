@@ -367,10 +367,7 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
             </p>
           ) : (
             <p
-              style={{
-                border: "2px dashed var(--border)", borderRadius: 8, padding: 24,
-                textAlign: "center", color: "var(--ink-2)",
-              }}
+              className="ez-dropzone"
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
@@ -529,7 +526,7 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
               <button type="button" className="ez-btn ez-btn--sm" disabled={busy} onClick={() => relinkInputRef.current?.click()}>
                 {t("relinkPick")}
               </button>
-              <ul style={{ fontSize: 12, fontFamily: "var(--font-mono)", maxHeight: 120, overflowY: "auto" }}>
+              <ul className="ez-mono-list">
                 {missing.slice(0, 50).map((m) => (
                   <li key={m.filename}>{m.filename}</li>
                 ))}
