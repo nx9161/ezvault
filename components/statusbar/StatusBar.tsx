@@ -87,7 +87,7 @@ export default function StatusBar({ projectId }: { projectId: string }) {
       </footer>
       {aboutOpen ? (
         <Dialog title={ta("about")} onClose={() => setAboutOpen(false)}>
-          <p style={{ fontSize: 13, lineHeight: 1.6 }}>{ta("disclaimerLong")}</p>
+          <p style={{ fontSize: 13, lineHeight: 1.6 }}>{ta("disclaimerShort")}</p>
           <p style={{ fontSize: 12, color: "var(--ink-2)" }}>{ta("tagline")}</p>
         </Dialog>
       ) : null}
