@@ -1,0 +1,680 @@
+// SPDX-License-Identifier: MIT
+// Left sidebar: Library, nested lists tree (DnD re-nest + cycle guard),
+// tags cloud (filter + manage). Design §1.2.
+
+"use client";
+
+import { useMemo, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
+import { useUiStore } from "@/lib/store/ui";
+import { useLists, useTags, useSearch, useTrash } from "@/lib/api/hooks";
+import { post, patch, del } from "@/lib/api/client";
+import { runCommand, renameListOp, moveListOp, deleteListOp, renameTagOp, deleteTagOp, recolorTagOp, type OpContext } from "@/lib/commands/ops";
+import { useDomainStore } from "@/lib/store/domain";
+import { Menu, MenuItem, MenuSeparator } from "@/components/ui/Menu";
+import { ConfirmDialog } from "@/components/ui/Dialog";
+import { ErrorCard, SkeletonRows } from "@/components/ui/Feedback";
+import type { ListNode, Tag } from "@/lib/api/types";
+
+export const TAG_COLORS = [
+  "#B3541E", "#2E7D4F", "#2B5E8B", "#B3261E",
+  "#7A4FA3", "#0E7C7B", "#B98A12", "#C2437E",
+  "#4A6FA5", "#5B8C3E", "#8C5B2E", "#5A5A5A",
+];
+
+/** Build a nested tree from a flat list (parent_id). Handles pre-nested too. */
+export function buildTree(lists: ListNode[]): ListNode[] {
+  const byId = new Map<string, ListNode>();
+  const roots: ListNode[] = [];
+  for (const l of lists) byId.set(l.id, { ...l, children: l.children ?? [] });
+  for (const l of byId.values()) {
+    if (l.parent_list_id && byId.has(l.parent_list_id) && l.parent_list_id !== l.id) {
+      byId.get(l.parent_list_id)!.children!.push(l);
+    } else {
+      roots.push(l);
+    }
+  }
+  const sortFn = (a: ListNode, b: ListNode) => a.position - b.position || a.name.localeCompare(b.name);
+  const sortDeep = (nodes: ListNode[]) => {
+    nodes.sort(sortFn);
+    nodes.forEach((n) => n.children && sortDeep(n.children));
+  };
+  sortDeep(roots);
+  return roots;
+}
+
+/** True if `candidate` is `node` itself or one of its descendants. */
+export function isDescendantOrSelf(node: ListNode, candidateId: string): boolean {
+  if (node.id === candidateId) return true;
+  return (node.children ?? []).some((c) => isDescendantOrSelf(c, candidateId));
+}
+
+function findNode(nodes: ListNode[], id: string): ListNode | null {
+  for (const n of nodes) {
+    if (n.id === id) return n;
+    const hit = n.children ? findNode(n.children, id) : null;
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function useOpContext(projectId: string): OpContext {
+  const pushToast = useUiStore((s) => s.pushToast);
+  const setLastAction = useDomainStore((s) => s.setLastAction);
+  const tabId = useDomainStore((s) => s.tabId);
+  return {
+    projectId,
+    tabId,
+    toast: (message, kind) => pushToast({ message, kind: kind ?? "info" }),
+    setLastAction,
+  };
+}
+
+function LibrarySection({ projectId }: { projectId: string }) {
+  const t = useTranslations("sidebar");
+  const libraryFilter = useUiStore((s) => s.libraryFilter);
+  const setLibraryFilter = useUiStore((s) => s.setLibraryFilter);
+  const setActiveListId = useUiStore((s) => s.setActiveListId);
+  const { data: trashData } = useTrash(projectId);
+  const trash = trashData?.items;
+  return (
+    <section className="ez-side-section" aria-label={t("library")}>
+      <h2>{t("library")}</h2>
+      <button
+        type="button"
+        className="ez-nav-row"
+        aria-current={libraryFilter === "all"}
+        onClick={() => setLibraryFilter("all")}
+      >
+        <span aria-hidden="true">▤</span> {t("allItems")}
+      </button>
+      <button
+        type="button"
+        className="ez-nav-row"
+        aria-current={libraryFilter === "unfiled"}
+        onClick={() => setLibraryFilter("unfiled")}
+      >
+        <span aria-hidden="true">⧉</span> {t("unfiled")}
+      </button>
+      <button
+        type="button"
+        className="ez-nav-row"
+        aria-current={libraryFilter === "trash"}
+        onClick={() => {
+          setLibraryFilter("trash");
+          setActiveListId(null);
+        }}
+      >
+        <span aria-hidden="true">🗑</span> {t("trash")}
+        {trash && trash.length > 0 ? (
+          <span className="ez-count">{trash.length}</span>
+        ) : null}
+      </button>
+    </section>
+  );
+}
+
+interface TreeRowProps {
+  node: ListNode;
+  depth: number;
+  projectId: string;
+  tree: ListNode[];
+  ctx: OpContext;
+  collapsed: Set<string>;
+  toggleCollapse: (id: string) => void;
+  onRename: (node: ListNode) => void;
+}
+
+function TreeRow({ node, depth, projectId, tree, ctx, collapsed, toggleCollapse, onRename }: TreeRowProps) {
+  const t = useTranslations("sidebar");
+  const tc = useTranslations("app");
+  const activeListId = useUiStore((s) => s.activeListId);
+  const setActiveListId = useUiStore((s) => s.setActiveListId);
+  const pushToast = useUiStore((s) => s.pushToast);
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const [dropTarget, setDropTarget] = useState(false);
+  const [shake, setShake] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [newSublist, setNewSublist] = useState(false);
+  const [sublistName, setSublistName] = useState("");
+  const hasChildren = (node.children?.length ?? 0) > 0;
+  const isCollapsed = collapsed.has(node.id);
+
+  async function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDropTarget(false);
+    // Case 1: a list being re-nested.
+    const draggedListId = e.dataTransfer.getData("application/x-ezvault-list");
+    if (draggedListId && draggedListId !== node.id) {
+      const dragged = findNode(tree, draggedListId);
+      if (!dragged) return;
+      if (isDescendantOrSelf(dragged, node.id)) {
+        // Cycle guard: refuse with shake + message (design §2.5).
+        setShake(true);
+        pushToast({ message: t("cycleError"), kind: "error" });
+        setTimeout(() => setShake(false), 300);
+        return;
+      }
+      await runCommand(ctx, moveListOp(ctx, draggedListId, dragged.parent_list_id, node.id), ["lists"]);
+      return;
+    }
+    // Case 2: item cards filed into the list.
+    const itemIds = e.dataTransfer.getData("application/x-ezvault-items");
+    if (itemIds) {
+      const ids: string[] = JSON.parse(itemIds);
+      for (const itemId of ids) {
+        await post(`/api/projects/${projectId}/lists/${node.id}/items`, { item_id: itemId, position: -1 });
+      }
+      const { refreshAndBroadcast } = await import("@/lib/commands/ops");
+      await refreshAndBroadcast(ctx, ["items", "lists"]);
+      return;
+    }
+  }
+
+  return (
+    <li>
+      <div
+        className="ez-tree-row"
+        role="treeitem"
+        aria-expanded={hasChildren ? !isCollapsed : undefined}
+        aria-current={activeListId === node.id}
+        data-drop-target={dropTarget || undefined}
+        data-shake={shake || undefined}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData("application/x-ezvault-list", node.id);
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        onDragOver={(e) => {
+          if (
+            e.dataTransfer.types.includes("application/x-ezvault-list") ||
+            e.dataTransfer.types.includes("application/x-ezvault-items")
+          ) {
+            e.preventDefault();
+            setDropTarget(true);
+          }
+        }}
+        onDragLeave={() => setDropTarget(false)}
+        onDrop={handleDrop}
+        onClick={() => setActiveListId(node.id)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenuAt({ x: e.clientX, y: e.clientY });
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "F2") {
+            e.preventDefault();
+            onRename(node);
+          } else if (e.key === "Delete") {
+            e.preventDefault();
+            setConfirmDelete(true);
+          } else if (e.key === "Enter") {
+            setActiveListId(node.id);
+          }
+        }}
+        tabIndex={0}
+        title={node.name}
+      >
+        {hasChildren ? (
+          <span
+            className="ez-tree-toggle"
+            role="button"
+            tabIndex={-1}
+            aria-hidden="true"
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleCollapse(node.id);
+            }}
+          >
+            {isCollapsed ? "▸" : "▾"}
+          </span>
+        ) : (
+          <span className="ez-tree-toggle" aria-hidden="true" />
+        )}
+        {node.color ? (
+          <span className="ez-color-dot" style={{ background: node.color }} aria-hidden="true" />
+        ) : null}
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {node.name}
+        </span>
+        {typeof node.item_count === "number" ? (
+          <span className="ez-count">{node.item_count}</span>
+        ) : null}
+      </div>
+      {menuAt ? (
+        <Menu anchor={menuAt} onClose={() => setMenuAt(null)} label={node.name}>
+          <MenuItem onSelect={() => onRename(node)}>{t("renameList")}</MenuItem>
+          <MenuItem onSelect={() => setNewSublist(true)}>{t("newSublist")}</MenuItem>
+          <MenuItem
+            onSelect={async () => {
+              const color = window.prompt(t("listColor"), node.color ?? "#B3541E");
+              if (color) {
+                await patch(`/api/projects/${projectId}/lists/${node.id}`, { color });
+                const { refreshAndBroadcast } = await import("@/lib/commands/ops");
+                await refreshAndBroadcast(ctx, ["lists"]);
+              }
+            }}
+          >
+            {t("listColor")}
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem danger onSelect={() => setConfirmDelete(true)}>
+            {t("deleteList")}
+          </MenuItem>
+        </Menu>
+      ) : null}
+      {newSublist ? (
+        <form
+          className="ez-inline-form"
+          style={{ paddingLeft: 28 }}
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const name = sublistName.trim();
+            if (!name) return;
+            await post(`/api/projects/${projectId}/lists`, { name, parent_list_id: node.id });
+            setNewSublist(false);
+            setSublistName("");
+            const { refreshAndBroadcast } = await import("@/lib/commands/ops");
+            await refreshAndBroadcast(ctx, ["lists"]);
+          }}
+        >
+          <input
+            className="ez-input"
+            value={sublistName}
+            onChange={(e) => setSublistName(e.target.value)}
+            placeholder={t("listName")}
+            aria-label={t("newSublist")}
+            autoFocus
+          />
+          <button type="submit" className="ez-btn ez-btn--sm ez-btn--primary">
+            {tc("save")}
+          </button>
+        </form>
+      ) : null}
+      {confirmDelete ? (
+        <ConfirmDialog
+          title={t("deleteListConfirmTitle")}
+          body={t("deleteListConfirmBody", { name: node.name })}
+          confirmLabel={t("deleteList")}
+          danger
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={async () => {
+            setConfirmDelete(false);
+            await runCommand(ctx, deleteListOp(ctx, node), ["lists"]);
+          }}
+        />
+      ) : null}
+      {hasChildren && !isCollapsed ? (
+        <ul className="ez-tree" role="group">
+          {node.children!.map((child) => (
+            <TreeRow
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              projectId={projectId}
+              tree={tree}
+              ctx={ctx}
+              collapsed={collapsed}
+              toggleCollapse={toggleCollapse}
+              onRename={onRename}
+            />
+          ))}
+        </ul>
+      ) : null}
+    </li>
+  );
+}
+
+function ListsSection({ projectId }: { projectId: string }) {
+  const t = useTranslations("sidebar");
+  const tc = useTranslations("app");
+  const ctx = useOpContext(projectId);
+  const { data, error, mutate } = useLists(projectId);
+  const { data: searchData } = useSearch(
+    projectId,
+    useUiStore((s) => s.activeQuery),
+    useUiStore((s) => s.searchScope),
+  );
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState("");
+  const [renaming, setRenaming] = useState<ListNode | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  const tree = useMemo(() => buildTree(data ?? []), [data]);
+  const badges = searchData?.badges;
+
+  function toggleCollapse(id: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function beginRename(node: ListNode) {
+    setRenaming(node);
+    setRenameValue(node.name);
+  }
+
+  async function commitRename() {
+    if (!renaming) return;
+    const next = renameValue.trim();
+    setRenaming(null);
+    if (next && next !== renaming.name) {
+      await runCommand(ctx, renameListOp(ctx, renaming, next), ["lists"]);
+    }
+  }
+
+  return (
+    <section className="ez-side-section" aria-label={t("lists")}>
+      <h2>
+        {t("lists")}
+        <button
+          type="button"
+          className="ez-icon-btn"
+          style={{ width: 22, height: 22 }}
+          onClick={() => setCreating(true)}
+          aria-label={t("newList")}
+          title={t("newList")}
+        >
+          +
+        </button>
+      </h2>
+      {error ? (
+        <ErrorCard what={t("lists")} onRetry={() => mutate()} />
+      ) : !data ? (
+        <SkeletonRows rows={4} />
+      ) : tree.length === 0 ? (
+        <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
+          <p>{t("emptyLists")}</p>
+          <button type="button" className="ez-btn ez-btn--sm" onClick={() => setCreating(true)}>
+            {t("newList")}
+          </button>
+        </div>
+      ) : (
+        <ul className="ez-tree" role="tree" aria-label={t("lists")}>
+          {tree.map((node) => (
+            <TreeRow
+              key={node.id}
+              node={node}
+              depth={0}
+              projectId={projectId}
+              tree={tree}
+              ctx={ctx}
+              collapsed={collapsed}
+              toggleCollapse={toggleCollapse}
+              onRename={beginRename}
+            />
+          ))}
+        </ul>
+      )}
+      {creating ? (
+        <form
+          className="ez-inline-form"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const trimmed = name.trim();
+            if (!trimmed) return;
+            await post(`/api/projects/${projectId}/lists`, { name: trimmed });
+            setCreating(false);
+            setName("");
+            const { refreshAndBroadcast } = await import("@/lib/commands/ops");
+            await refreshAndBroadcast(ctx, ["lists"]);
+          }}
+        >
+          <input
+            className="ez-input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t("listName")}
+            aria-label={t("newList")}
+            autoFocus
+          />
+          <button type="submit" className="ez-btn ez-btn--sm ez-btn--primary">
+            {tc("save")}
+          </button>
+        </form>
+      ) : null}
+      {renaming ? (
+        <form
+          className="ez-inline-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            commitRename();
+          }}
+        >
+          <input
+            className="ez-input"
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            aria-label={t("renameList")}
+            autoFocus
+            onBlur={commitRename}
+          />
+          <button type="submit" className="ez-btn ez-btn--sm ez-btn--primary">
+            {tc("save")}
+          </button>
+        </form>
+      ) : null}
+      {badges ? (
+        <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 8 }}>
+          {Object.entries(badges)
+            .filter(([, n]) => n > 0)
+            .slice(0, 8)
+            .map(([listId, n]) => {
+              const node = findNode(tree, listId);
+              return node ? (
+                <div key={listId}>
+                  {node.name}: {n}
+                </div>
+              ) : null;
+            })}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function TagsSection({ projectId }: { projectId: string }) {
+  const t = useTranslations("sidebar");
+  const tc = useTranslations("app");
+  const ctx = useOpContext(projectId);
+  const { data: tagsData, error, mutate } = useTags(projectId);
+  const data = Array.isArray(tagsData) ? tagsData : (tagsData?.items ?? []);
+  const activeTagIds = useUiStore((s) => s.activeTagIds);
+  const toggleTag = useUiStore((s) => s.toggleTag);
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState("");
+  const [color, setColor] = useState(TAG_COLORS[0]);
+  const [menu, setMenu] = useState<{ tag: Tag; x: number; y: number } | null>(null);
+  const [renaming, setRenaming] = useState<Tag | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<Tag | null>(null);
+
+  async function commitRename() {
+    if (!renaming) return;
+    const next = renameValue.trim();
+    const tag = renaming;
+    setRenaming(null);
+    if (next && next !== tag.name) {
+      await runCommand(ctx, renameTagOp(ctx, tag, next), ["tags", "items"]);
+    }
+  }
+
+  return (
+    <section className="ez-side-section" aria-label={t("tags")}>
+      <h2>
+        {t("tags")}
+        <button
+          type="button"
+          className="ez-icon-btn"
+          style={{ width: 22, height: 22 }}
+          onClick={() => setCreating(true)}
+          aria-label={t("newTag")}
+          title={t("newTag")}
+        >
+          +
+        </button>
+      </h2>
+      <p style={{ fontSize: 11, color: "var(--ink-3)", margin: "0 0 8px" }}>{t("filterHint")}</p>
+      {error ? (
+        <ErrorCard what={t("tags")} onRetry={() => mutate()} />
+      ) : !data ? (
+        <SkeletonRows rows={3} />
+      ) : (
+        <div className="ez-tag-cloud" role="group" aria-label={t("tags")}>
+          {data.map((tag) => (
+            <button
+              key={tag.id}
+              type="button"
+              className="ez-tag-chip"
+              aria-pressed={activeTagIds.includes(tag.id)}
+              onClick={(e) => toggleTag(tag.id, e.shiftKey)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setMenu({ tag, x: e.clientX, y: e.clientY });
+              }}
+              title={tag.name}
+            >
+              <span className="ez-color-dot" style={{ background: tag.color }} aria-hidden="true" />
+              {tag.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {creating ? (
+        <form
+          className="ez-inline-form"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const trimmed = name.trim();
+            if (!trimmed) return;
+            await post(`/api/projects/${projectId}/tags`, { name: trimmed, color });
+            setCreating(false);
+            setName("");
+            const { refreshAndBroadcast } = await import("@/lib/commands/ops");
+            await refreshAndBroadcast(ctx, ["tags"]);
+          }}
+        >
+          <input
+            className="ez-input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t("tagName")}
+            aria-label={t("newTag")}
+            autoFocus
+          />
+          <input
+            type="color"
+            value={color}
+            onChange={(e) => setColor(e.target.value)}
+            aria-label={t("tagColor")}
+            list="ez-tag-colors"
+            style={{ width: 36, height: 30, padding: 0, border: "1px solid var(--border)", borderRadius: 4 }}
+          />
+          <datalist id="ez-tag-colors">
+            {TAG_COLORS.map((c) => (
+              <option key={c} value={c} />
+            ))}
+          </datalist>
+          <button type="submit" className="ez-btn ez-btn--sm ez-btn--primary">
+            {tc("save")}
+          </button>
+        </form>
+      ) : null}
+      {renaming ? (
+        <form
+          className="ez-inline-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            commitRename();
+          }}
+        >
+          <input
+            className="ez-input"
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            aria-label={t("renameTag")}
+            autoFocus
+            onBlur={commitRename}
+          />
+          <button type="submit" className="ez-btn ez-btn--sm ez-btn--primary">
+            {tc("save")}
+          </button>
+        </form>
+      ) : null}
+      {menu ? (
+        <Menu
+          anchor={{ x: menu.x, y: menu.y }}
+          onClose={() => setMenu(null)}
+          label={menu.tag.name}
+        >
+          <MenuItem
+            onSelect={() => {
+              setRenaming(menu.tag);
+              setRenameValue(menu.tag.name);
+            }}
+          >
+            {t("renameTag")}
+          </MenuItem>
+          <MenuItem
+            onSelect={async () => {
+              const next = window.prompt(t("tagColor"), menu.tag.color);
+              if (next) await runCommand(ctx, recolorTagOp(ctx, menu.tag, next), ["tags"]);
+            }}
+          >
+            {t("tagColor")}
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem danger onSelect={() => setConfirmDelete(menu.tag)}>
+            {t("deleteTag")}
+          </MenuItem>
+        </Menu>
+      ) : null}
+      {confirmDelete ? (
+        <ConfirmDialog
+          title={t("deleteTagConfirmTitle")}
+          body={t("deleteTagConfirmBody", { name: confirmDelete.name })}
+          confirmLabel={t("deleteTag")}
+          danger
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={async () => {
+            const tag = confirmDelete;
+            setConfirmDelete(null);
+            await runCommand(ctx, deleteTagOp(ctx, tag), ["tags", "items"]);
+          }}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+export default function Sidebar({ projectId }: { projectId: string }) {
+  const sidebarOpen = useUiStore((s) => s.sidebarOpen);
+  const setSidebarOpen = useUiStore((s) => s.setSidebarOpen);
+  const sidebarWidth = useUiStore((s) => s.sidebarWidth);
+  return (
+    <>
+      {sidebarOpen ? (
+        <div className="ez-scrim" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
+      ) : null}
+      <aside
+        id="ez-sidebar"
+        className="ez-sidebar"
+        data-open={sidebarOpen}
+        style={{ width: sidebarWidth }}
+        aria-label="sidebar"
+      >
+        <div className="ez-sidebar-scroll">
+          <LibrarySection projectId={projectId} />
+          <ListsSection projectId={projectId} />
+          <TagsSection projectId={projectId} />
+        </div>
+      </aside>
+    </>
+  );
+}
+
+export { useOpContext };
