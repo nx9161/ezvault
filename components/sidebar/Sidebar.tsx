@@ -14,6 +14,7 @@ import { useDomainStore } from "@/lib/store/domain";
 import { Menu, MenuItem, MenuSeparator } from "@/components/ui/Menu";
 import { ConfirmDialog } from "@/components/ui/Dialog";
 import { ErrorCard, SkeletonRows } from "@/components/ui/Feedback";
+import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
 import {
   LibraryIcon,
   TrashIcon,
@@ -800,6 +801,8 @@ export default function Sidebar({ projectId }: { projectId: string }) {
   const sidebarOpen = useUiStore((s) => s.sidebarOpen);
   const setSidebarOpen = useUiStore((s) => s.setSidebarOpen);
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
+  // D-M10: inline widths apply only at desktop widths; drawers below 1280px.
+  const isDesktop = useMediaQuery("(min-width: 1280px)");
   return (
     <>
       {sidebarOpen ? (
@@ -809,7 +812,7 @@ export default function Sidebar({ projectId }: { projectId: string }) {
         id="ez-sidebar"
         className="ez-sidebar"
         data-open={sidebarOpen}
-        style={{ width: sidebarWidth }}
+        style={isDesktop ? { width: sidebarWidth } : undefined}
         aria-label="sidebar"
       >
         <div className="ez-sidebar-scroll">

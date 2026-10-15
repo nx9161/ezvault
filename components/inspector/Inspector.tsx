@@ -13,6 +13,7 @@ import { runCommand, trashSubjectsOp } from "@/lib/commands/ops";
 import { useOpContext } from "@/components/sidebar/Sidebar";
 import { ErrorCard, SkeletonRows } from "@/components/ui/Feedback";
 import { ExportIcon, TrashIcon, CloseIcon } from "@/components/ui/icons";
+import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
 import PhotoViewer from "./PhotoViewer";
 import MetadataForm from "./MetadataForm";
 import NotesPanel from "./NotesPanel";
@@ -268,6 +269,8 @@ export default function Inspector({ projectId }: { projectId: string }) {
   const inspectorWidth = useUiStore((s) => s.inspectorWidth);
   const inspectorOpen = useUiStore((s) => s.inspectorOpen);
   const setInspectorOpen = useUiStore((s) => s.setInspectorOpen);
+  // D-M10: inline widths apply only at desktop widths; drawers below 1280px.
+  const isDesktop = useMediaQuery("(min-width: 1280px)");
 
   const bulkIds = selectedIds.length > 1 ? selectedIds : [];
 
@@ -280,7 +283,7 @@ export default function Inspector({ projectId }: { projectId: string }) {
         id="ez-inspector"
         className="ez-inspector"
         data-open={inspectorOpen || !!activeItemId || bulkIds.length > 0}
-        style={{ width: inspectorWidth }}
+        style={isDesktop ? { width: inspectorWidth } : undefined}
         aria-label="inspector"
       >
         {!activeItemId && bulkIds.length === 0 ? (

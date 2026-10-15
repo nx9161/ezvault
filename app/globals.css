@@ -502,11 +502,12 @@ details.ez-collapsible > summary { padding: 8px 12px; cursor: pointer; font-size
 /* ---------- Responsive ---------- */
 .ez-mobile-nav { display: none; }
 @media (max-width: 1279px) {
-  .ez-sidebar { position: fixed; left: 0; top: 0; bottom: 0; z-index: 150; transform: translateX(-100%); transition: transform 220ms ease-out; width: 300px; box-shadow: 0 12px 40px rgba(20,15,5,.25); }
+  .ez-sidebar { position: fixed; left: 0; top: 0; bottom: 0; z-index: 150; transform: translateX(-100%); transition: transform 220ms ease-out; width: min(86vw, 340px); box-shadow: 0 12px 40px rgba(20,15,5,.25); }
   .ez-sidebar[data-open="true"] { transform: none; }
-  .ez-inspector { position: fixed; right: 0; top: 0; bottom: 0; z-index: 150; width: min(70vw, 560px); transform: translateX(100%); transition: transform 220ms ease-out; box-shadow: 0 12px 40px rgba(20,15,5,.25); }
+  .ez-inspector { position: fixed; right: 0; top: 0; bottom: 0; z-index: 150; width: min(94vw, 560px); transform: translateX(100%); transition: transform 220ms ease-out; box-shadow: 0 12px 40px rgba(20,15,5,.25); }
   .ez-inspector[data-open="true"] { transform: none; }
   .ez-scrim { position: fixed; inset: 0; background: rgba(20,15,5,.4); z-index: 140; }
+  .ez-splitter { display: none; }
 }
 @media (max-width: 767px) {
   .ez-topbar { flex-wrap: wrap; }
