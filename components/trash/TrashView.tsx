@@ -15,6 +15,9 @@ import { ErrorCard, SkeletonRows } from "@/components/ui/Feedback";
 
 export default function TrashView({ projectId }: { projectId: string }) {
   const t = useTranslations("trash");
+  const ta = useTranslations("app");
+  const kindLabel = (kind: string) =>
+    ta(kind === "photo" ? "kindPhoto" : kind === "selection" ? "kindSelection" : "kindItem");
   const ctx = useOpContext(projectId);
   const { data, error, isLoading, mutate } = useTrash(projectId);
   const [confirmEmpty, setConfirmEmpty] = useState(false);
@@ -94,7 +97,7 @@ export default function TrashView({ projectId }: { projectId: string }) {
                 <span style={{ fontSize: 11, color: "var(--ink-3)" }}>
                   {t("deletedOn", {
                     date: new Date(e.deleted_at).toLocaleDateString(),
-                  })}{" · "}{e.subject_kind}
+                  })}{" · "}{kindLabel(e.subject_kind)}
                 </span>
               </span>
               <span className="ez-reason-badge" data-reason={e.reason}>

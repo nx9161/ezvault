@@ -562,8 +562,79 @@ function SelectionToolbar({
   );
 }
 
+const hitItemCache = new Map<string, { itemId: string; title: string }>();
+let hitItemCacheQuery = "";
+
+function kindLabelKey(kind: string): "kindPhoto" | "kindSelection" | "kindItem" {
+  if (kind === "photo") return "kindPhoto";
+  if (kind === "selection") return "kindSelection";
+  return "kindItem";
+}
+
+/** Headline for one search hit; resolves the parent item title lazily. */
+function SearchHitTitle({
+  hit,
+  projectId,
+  activeQuery,
+}: {
+  hit: { subject_id: string; subject_kind: string };
+  projectId: string;
+  activeQuery: string;
+}) {
+  const t = useTranslations("search");
+  const ta = useTranslations("app");
+  const [resolved, setResolved] = useState<{ itemId: string; title: string } | null | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    // Fresh query, fresh titles: drop the previous query's resolutions.
+    if (hitItemCacheQuery !== activeQuery) {
+      hitItemCache.clear();
+      hitItemCacheQuery = activeQuery;
+    }
+    (async () => {
+      try {
+        const key = `${hit.subject_kind}:${hit.subject_id}`;
+        const cached = hitItemCache.get(key);
+        if (cached) {
+          if (!cancelled) setResolved(cached);
+          return;
+        }
+        let itemId: string | null = null;
+        if (hit.subject_kind === "item") {
+          itemId = hit.subject_id;
+        } else if (hit.subject_kind === "photo") {
+          const photo = await get<{ item_id: string }>(`/api/projects/${projectId}/photos/${hit.subject_id}`);
+          itemId = photo.item_id;
+        } else {
+          const sel = await get<{ photo_id: string }>(`/api/projects/${projectId}/selections/${hit.subject_id}`);
+          const photo = await get<{ item_id: string }>(`/api/projects/${projectId}/photos/${sel.photo_id}`);
+          itemId = photo.item_id;
+        }
+        if (!itemId) throw new Error("no item");
+        const item = await get<{ title?: string }>(`/api/projects/${projectId}/items/${itemId}`);
+        const entry = { itemId, title: item.title || "Untitled" };
+        hitItemCache.set(key, entry);
+        if (!cancelled) setResolved(entry);
+      } catch {
+        if (!cancelled) setResolved(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hit.subject_kind, hit.subject_id, projectId, activeQuery]);
+
+  if (resolved === undefined) return <h3>{ta(kindLabelKey(hit.subject_kind))}</h3>;
+  if (resolved === null) return <h3>{ta(kindLabelKey(hit.subject_kind))}</h3>;
+  if (hit.subject_kind === "item") return <h3>{resolved.title}</h3>;
+  if (hit.subject_kind === "photo") return <h3>{t("hitPhotoIn", { title: resolved.title })}</h3>;
+  return <h3>{t("hitSelectionIn", { title: resolved.title })}</h3>;
+}
+
 function SearchResults({ projectId }: { projectId: string }) {
   const t = useTranslations("search");
+  const ta = useTranslations("app");
   const tc = useTranslations("center");
   const activeQuery = useUiStore((s) => s.activeQuery);
   const searchScope = useUiStore((s) => s.searchScope);
@@ -640,10 +711,8 @@ function SearchResults({ projectId }: { projectId: string }) {
               setSearchActive(false);
             }}
           >
-            <span className="ez-result-scope">{r.subject_kind}</span>
-            <h3>
-              {r.subject_kind} {r.subject_id.slice(0, 8)}
-            </h3>
+            <span className="ez-result-scope">{ta(kindLabelKey(r.subject_kind))}</span>
+            <SearchHitTitle hit={r} projectId={projectId} activeQuery={activeQuery} />
             <span className="ez-result-snippet">{renderSnippet(r.snippet)}</span>
           </button>
         ))
