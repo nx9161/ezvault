@@ -48,7 +48,21 @@
 
 * { box-sizing: border-box; }
 
-html, body {
+/* D-E8: motion entrances. Only entry keyframes; exits are unmounts.
+   The global prefers-reduced-motion rule above collapses all of these. */
+@keyframes ez-dialog-in { from { opacity: 0; transform: translateY(6px) scale(.985); } }
+@keyframes ez-scrim-in { from { opacity: 0; } }
+@keyframes ez-menu-in { from { opacity: 0; transform: translateY(-3px) scale(.985); } }
+@keyframes ez-toast-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes ez-bar-in { from { opacity: 0; transform: translateY(4px); } }
+.ez-dialog { animation: ez-dialog-in 160ms ease-out; }
+.ez-scrim { animation: ez-scrim-in 140ms ease-out; }
+.ez-menu { animation: ez-menu-in 120ms ease-out; }
+.ez-toast { animation: ez-toast-in 180ms ease-out; }
+.ez-selection-bar { animation: ez-bar-in 160ms ease-out; }
+
+html,
+body {
   margin: 0;
   padding: 0;
   background: var(--bg);
