@@ -41,6 +41,29 @@ interface Transform {
 /** In-memory original cache for the session (1:1 zoom). */
 const originalCache = new Map<string, ImageBitmap>();
 
+/** D-E6: selection rects read the live theme accent (cached per theme). */
+let cachedTheme: string | null = null;
+let cachedAccent = "#E08A3C";
+let cachedAccentDim = "rgba(224,138,60,.55)";
+
+function toRgba(hex: string, alpha: number): string {
+  const m = hex.match(/^#([0-9a-f]{6})$/i);
+  if (!m) return `rgba(224,138,60,${alpha})`;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
+function themeAccent(): { solid: string; dim: string } {
+  const theme = document.documentElement.getAttribute("data-theme") ?? "light";
+  if (theme !== cachedTheme) {
+    cachedTheme = theme;
+    cachedAccent =
+      getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#E08A3C";
+    cachedAccentDim = toRgba(cachedAccent, 0.55);
+  }
+  return { solid: cachedAccent, dim: cachedAccentDim };
+}
+
 function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -225,6 +248,8 @@ export default function PhotoViewer({
   }
 
   function drawAll() {
+    // D-E6: selection rects read the theme accent (not hardcoded amber).
+    const { solid, dim } = themeAccent();
     const base = baseRef.current;
     const overlay = overlayRef.current;
     const frame = frameRef.current;
@@ -272,13 +297,13 @@ export default function PhotoViewer({
       const rw = Math.abs(x1 - x0);
       const rh = Math.abs(y1 - y0);
       const active = sel.id === activeSelectionId;
-      octx.strokeStyle = active ? "#E08A3C" : "rgba(224,138,60,.55)";
+      octx.strokeStyle = active ? solid : dim;
       octx.lineWidth = active ? 2.5 : 1.5;
       octx.setLineDash(active ? [] : [5, 4]);
       octx.strokeRect(rx, ry, rw, rh);
       octx.setLineDash([]);
       if (active) {
-        octx.fillStyle = "#E08A3C";
+        octx.fillStyle = solid;
         octx.font = "11px system-ui";
         octx.fillText(sel.name, rx + 4, ry - 6 > 8 ? ry - 6 : ry + 14);
       }
@@ -287,7 +312,7 @@ export default function PhotoViewer({
       const { x0, y0, x1, y1 } = drawRect.current;
       const [sx0, sy0] = photoToScreen(x0, y0);
       const [sx1, sy1] = photoToScreen(x1, y1);
-      octx.strokeStyle = "#E08A3C";
+      octx.strokeStyle = solid;
       octx.lineWidth = 2;
       octx.setLineDash([6, 4]);
       octx.strokeRect(Math.min(sx0, sx1), Math.min(sy0, sy1), Math.abs(sx1 - sx0), Math.abs(sy1 - sy0));
@@ -313,7 +338,7 @@ export default function PhotoViewer({
           // space, then into minimap space.
           const [pvx, pvy] = screenToPhoto(0, 0);
           const [pvx2, pvy2] = screenToPhoto(cw, ch);
-          nctx.strokeStyle = "#E08A3C";
+          nctx.strokeStyle = solid;
           nctx.lineWidth = 1.5;
           nctx.strokeRect(
             (pvx / photo.width) * nw,
