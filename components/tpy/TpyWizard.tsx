@@ -555,6 +555,16 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
       {step === "report" ? (
         <div data-tour="tpy-report">
           <h3 style={{ fontSize: 16 }}>{t("reportTitle")}</h3>
+          {/* A6: render the job's failure reason verbatim when the run failed. */}
+          {runJob?.status === "failed" && runJob.error ? (
+            <div className="ez-banner" data-kind="danger" role="alert" style={{ borderRadius: 8, margin: "8px 0" }}>
+              <span>
+                <strong>{t("runFailedTitle")}</strong>
+                <br />
+                {runJob.error}
+              </span>
+            </div>
+          ) : null}
           {runReport ? (
             <>
               <p style={{ fontSize: 13 }}>

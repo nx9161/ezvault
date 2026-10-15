@@ -427,7 +427,13 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
           importUndoCommand(ctx, job.id, t("undoImport")),
         );
       } else if (job.status === "failed") {
-        pushToast({ message: t("partialToast", { done: job.done, failed: job.failed }), kind: "error" });
+        // A6: surface the job's failure reason (import_jobs.error) verbatim.
+        pushToast({
+          message: job.error
+            ? `${t("partialToast", { done: job.done, failed: job.failed })} — ${job.error}`
+            : t("partialToast", { done: job.done, failed: job.failed }),
+          kind: "error",
+        });
       }
       void refreshAndBroadcast(ctx, ["items", "meter", "lists"]);
       void mutate((k) => typeof k === "string" && k.includes(`/api/projects/${projectId}`));
