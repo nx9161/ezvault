@@ -110,7 +110,7 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
   // Shown as a "N folder lists created" note once the run starts.
   const [folderMapping, setFolderMapping] = useState<Record<string, { list_id: string }> | null>(null);
   const [dupeAsk, setDupeAsk] = useState<{
-    duplicates: { sha256: string; filename: string; key: string }[];
+    duplicates: { sha256: string; filename: string; key: string; size: number }[];
     files: CompleteFile[];
     jobId: string;
   } | null>(null);
@@ -346,11 +346,16 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
       const dupes = result.rejected.filter((r) => /duplicat/i.test(r.reason));
       if (dupes.length > 0 && duplicatePolicy === "ask") {
         setDupeAsk({
-          duplicates: dupes.map((d) => ({
-            sha256: completeFiles.find((f) => f.key === d.key)?.sha256 ?? d.key,
-            filename: completeFiles.find((f) => f.key === d.key)?.filename ?? d.key,
-            key: d.key,
-          })),
+          duplicates: dupes.map((d) => {
+            const qf = completeFiles.find((f) => f.key === d.key);
+            return {
+              sha256: qf?.sha256 ?? d.key,
+              filename: qf?.filename ?? d.key,
+              key: d.key,
+              // F-I: show file size in the duplicate-ask rows.
+              size: qf?.size ?? 0,
+            };
+          }),
           files: completeFiles,
           jobId: completeJobId,
         });
@@ -674,7 +679,12 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
           <div style={{ maxHeight: 180, overflowY: "auto" }}>
             {dupeAsk.duplicates.map((d) => (
               <div key={d.key} className="ez-file-row">
-                <span className="ez-name">{d.filename}</span>
+                <span className="ez-name">
+                  {d.filename}
+                  <span style={{ color: "var(--ink-3)", marginLeft: 8 }}>
+                    {formatBytes(d.size)}
+                  </span>
+                </span>
                 <label style={{ fontSize: 12, display: "inline-flex", gap: 4, alignItems: "center" }}>
                   <input
                     type="radio"
