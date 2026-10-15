@@ -85,7 +85,7 @@ export function MenuItem({
   danger,
 }: {
   children: ReactNode;
-  onSelect: () => void;
+  onSelect: (e: RMouseEvent) => void;
   danger?: boolean;
 }) {
   return (

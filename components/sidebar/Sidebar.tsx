@@ -22,12 +22,8 @@ import {
   ChevronDownIcon,
 } from "@/components/ui/icons";
 import type { ListNode, Tag } from "@/lib/api/types";
-
-export const TAG_COLORS = [
-  "#B3541E", "#2E7D4F", "#2B5E8B", "#B3261E",
-  "#7A4FA3", "#0E7C7B", "#B98A12", "#C2437E",
-  "#4A6FA5", "#5B8C3E", "#8C5B2E", "#5A5A5A",
-];
+import { TAG_COLORS } from "@/components/ui/ColorSwatch";
+import { ColorSwatchPopover } from "@/components/ui/ColorSwatch";
 
 /** Build a nested tree from a flat list (parent_id). Handles pre-nested too. */
 export function buildTree(lists: ListNode[]): ListNode[] {
@@ -188,6 +184,8 @@ function TreeRow({
   const setActiveListId = useUiStore((s) => s.setActiveListId);
   const pushToast = useUiStore((s) => s.pushToast);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  // D-M8a: swatch popover replaces window.prompt for the list color.
+  const [swatchAt, setSwatchAt] = useState<{ x: number; y: number } | null>(null);
   const [dropTarget, setDropTarget] = useState(false);
   const [shake, setShake] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -342,13 +340,9 @@ function TreeRow({
           <MenuItem onSelect={() => onRename(node)}>{t("renameList")}</MenuItem>
           <MenuItem onSelect={() => setNewSublist(true)}>{t("newSublist")}</MenuItem>
           <MenuItem
-            onSelect={async () => {
-              const color = window.prompt(t("listColor"), node.color ?? "#B3541E");
-              if (color) {
-                await patch(`/api/projects/${projectId}/lists/${node.id}`, { color });
-                const { refreshAndBroadcast } = await import("@/lib/commands/ops");
-                await refreshAndBroadcast(ctx, ["lists"]);
-              }
+            onSelect={(e) => {
+              // The menu auto-closes; open the swatch popover at the click position.
+              setSwatchAt({ x: e.clientX, y: e.clientY });
             }}
           >
             {t("listColor")}
@@ -358,6 +352,20 @@ function TreeRow({
             {t("deleteList")}
           </MenuItem>
         </Menu>
+      ) : null}
+      {swatchAt ? (
+        <ColorSwatchPopover
+          anchor={swatchAt}
+          initial={node.color ?? "#B3541E"}
+          label={t("listColor")}
+          onCancel={() => setSwatchAt(null)}
+          onPick={async (color) => {
+            setSwatchAt(null);
+            await patch(`/api/projects/${projectId}/lists/${node.id}`, { color });
+            const { refreshAndBroadcast } = await import("@/lib/commands/ops");
+            await refreshAndBroadcast(ctx, ["lists"]);
+          }}
+        />
       ) : null}
       {newSublist ? (
         <form
@@ -616,6 +624,8 @@ function TagsSection({ projectId }: { projectId: string }) {
   const [renaming, setRenaming] = useState<Tag | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<Tag | null>(null);
+  // D-M8a: swatch popover replaces window.prompt for the tag color.
+  const [swatch, setSwatch] = useState<{ tag: Tag; x: number; y: number } | null>(null);
 
   async function commitRename() {
     if (!renaming) return;
@@ -743,9 +753,8 @@ function TagsSection({ projectId }: { projectId: string }) {
             {t("renameTag")}
           </MenuItem>
           <MenuItem
-            onSelect={async () => {
-              const next = window.prompt(t("tagColor"), menu.tag.color);
-              if (next) await runCommand(ctx, recolorTagOp(ctx, menu.tag, next), ["tags"]);
+            onSelect={(e) => {
+              setSwatch({ tag: menu.tag, x: e.clientX, y: e.clientY });
             }}
           >
             {t("tagColor")}
@@ -755,6 +764,19 @@ function TagsSection({ projectId }: { projectId: string }) {
             {t("deleteTag")}
           </MenuItem>
         </Menu>
+      ) : null}
+      {swatch ? (
+        <ColorSwatchPopover
+          anchor={{ x: swatch.x, y: swatch.y }}
+          initial={swatch.tag.color}
+          label={t("tagColor")}
+          onCancel={() => setSwatch(null)}
+          onPick={async (next) => {
+            const tag = swatch.tag;
+            setSwatch(null);
+            await runCommand(ctx, recolorTagOp(ctx, tag, next), ["tags"]);
+          }}
+        />
       ) : null}
       {confirmDelete ? (
         <ConfirmDialog

@@ -47,6 +47,7 @@ export default function NotesEditor({
   onLanguageChange: (lang: string) => void;
 }) {
   const t = useTranslations("notes");
+  const ta = useTranslations("app");
   const pushToast = useUiStore((s) => s.pushToast);
   const setDirty = useDomainStore((s) => s.setDirty);
 
@@ -200,19 +201,37 @@ export default function NotesEditor({
     else if (mark === "subscript") chain.toggleSubscript().run();
   };
 
-  function setLink() {
-    const prev = ed.getAttributes("link").href as string | undefined;
-    const url = window.prompt(t("linkUrl"), prev ?? "https://");
-    if (url === null) return;
-    if (url === "") {
-      ed.chain().focus().unsetLink().run();
-      return;
-    }
+  // D-M8b: link URL popover replaces window.prompt.
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkPrev, setLinkPrev] = useState<string | undefined>(undefined);
+  const linkBtnRef = useRef<HTMLButtonElement>(null);
+  const linkInputRef = useRef<HTMLInputElement>(null);
+
+  function openLinkPopover() {
+    setLinkPrev(ed.getAttributes("link").href as string | undefined);
+    setLinkOpen(true);
+  }
+  useEffect(() => {
+    if (linkOpen) linkInputRef.current?.select();
+  }, [linkOpen]);
+  function closeLinkPopover() {
+    setLinkOpen(false);
+    linkBtnRef.current?.focus();
+  }
+  function applyLink() {
+    const url = linkInputRef.current?.value.trim() ?? "";
     if (!isAllowedUri(url)) {
       pushToast({ message: t("linkBlocked"), kind: "error" });
       return;
     }
     ed.chain().focus().setLink({ href: url }).run();
+    setLinkOpen(false);
+    linkBtnRef.current?.focus();
+  }
+  function removeLink() {
+    ed.chain().focus().unsetLink().run();
+    setLinkOpen(false);
+    linkBtnRef.current?.focus();
   }
 
   const btn = (label: React.ReactNode, active: boolean, onClick: () => void, title: string) => (
@@ -241,7 +260,52 @@ export default function NotesEditor({
         {btn("❝", ed.isActive("blockquote"), () => ed.chain().focus().toggleBlockquote().run(), t("blockquote"))}
         {btn("•", ed.isActive("bulletList"), () => ed.chain().focus().toggleBulletList().run(), t("bulletList"))}
         {btn("1.", ed.isActive("orderedList"), () => ed.chain().focus().toggleOrderedList().run(), t("orderedList"))}
-        {btn(<LinkIcon size={15} />, ed.isActive("link"), setLink, t("link"))}
+        <button
+          ref={linkBtnRef}
+          type="button"
+          className="ez-icon-btn"
+          data-active={ed.isActive("link") || undefined}
+          onClick={openLinkPopover}
+          title={t("link")}
+          aria-pressed={ed.isActive("link")}
+          aria-haspopup="dialog"
+          aria-expanded={linkOpen}
+        >
+          <LinkIcon size={15} />
+        </button>
+        {linkOpen ? (
+          <div className="ez-link-pop" role="dialog" aria-label={t("link")}>
+            <input
+              ref={linkInputRef}
+              className="ez-input"
+              defaultValue={linkPrev ?? "https://"}
+              aria-label={t("linkUrl")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  applyLink();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  closeLinkPopover();
+                }
+              }}
+            />
+            <div className="ez-link-pop-actions">
+              {linkPrev ? (
+                <button type="button" className="ez-btn ez-btn--sm" onClick={removeLink}>
+                  {t("unlink")}
+                </button>
+              ) : null}
+              <span style={{ flex: 1 }} />
+              <button type="button" className="ez-btn ez-btn--sm" onClick={closeLinkPopover}>
+                {ta("cancel")}
+              </button>
+              <button type="button" className="ez-btn ez-btn--sm ez-btn--primary" onClick={applyLink}>
+                {t("linkApply")}
+              </button>
+            </div>
+          </div>
+        ) : null}
         <span style={{ flex: 1 }} />
         <label style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11 }}>
           {t("language")}
