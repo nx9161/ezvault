@@ -94,14 +94,6 @@ export function useGlobalShortcuts(projectId: string, ctx: OpContext) {
         e.preventDefault();
         ui.setSidebarOpen(true);
         document.getElementById("ez-sidebar")?.querySelector<HTMLElement>(".ez-icon-btn")?.focus();
-      } else if (e.shiftKey && k === "m") {
-        e.preventDefault();
-        if (ui.selectedIds.length >= 2) {
-          const { runCommand, mergeItemsOp } = await import("@/lib/commands/ops");
-          const [target] = ui.selectedIds;
-          await runCommand(ctx, mergeItemsOp(ctx, ui.selectedIds, target), ["items", "trash", "meter"]);
-          ui.setSelectedIds([target]);
-        }
       } else if (k === "k") {
         e.preventDefault();
         document.getElementById("ez-global-search")?.focus();

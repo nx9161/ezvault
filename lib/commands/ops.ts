@@ -254,14 +254,16 @@ export function mergeItemsOp(
   itemIds: string[],
   targetId: string,
 ): Command {
-  // Merge needs photo reassignment, which the landed routes do not offer
-  // (photo PATCH has no item_id; bulk has no merge op). Honest placeholder:
-  // the UI explains the blocker and changes nothing.
+  // Wave-2 placeholder: merge needs photo reassignment, which the landed
+  // routes do not offer (photo PATCH has no item_id; bulk has no merge op).
+  // The UI is gated until then (disabled "Merge items (wave 2)" button —
+  // QA round 1): this op exists only so wave 2 has the seam. It changes
+  // nothing and says so honestly instead of promising something pending.
   void itemIds;
   void targetId;
   return makeCommand("Merge items", "items", async () => {
     ctx.toast(
-      "Merging items needs the backend merge endpoint (photo reassignment). Nothing was changed.",
+      "Merging items ships in wave 2 — the backend merge endpoint (photo reassignment) does not exist yet. Nothing was changed.",
       "error",
     );
   }, async () => {

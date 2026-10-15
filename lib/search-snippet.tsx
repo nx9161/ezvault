@@ -11,6 +11,13 @@
 // inject elements or attributes; visual output is identical to rendering
 // the payload as-is for conforming input.
 //
+// Entity note (F3): the wire text is server-escaped, so React text nodes
+// would double-escape it (`R&amp;D` rendering literally). Every text segment
+// is decoded for exactly the five wire entities (`&amp; &lt; &gt; &quot;`
+// `&#39;`) in one pass before becoming a React node — `<mark>` structure is
+// honored, and a literal `&amp;lt;` in the source decodes to the text `&lt;`,
+// never to markup.
+//
 // The sentinel branch below is a defensive fallback (sentinels never appear
 // in the wire payload per the contract); it renders them safely rather than
 // leaking raw tokens into the UI.
@@ -18,17 +25,36 @@
 import type { ReactNode } from "react";
 import { SEARCH_SENTINEL_START, SEARCH_SENTINEL_END } from "@/lib/types";
 
+// F3 — the wire payload is server-escaped HTML (B14): every `& < > " '`
+// arrives as one of exactly five entities. React text nodes re-escape on
+// render, so pushing the raw wire text double-escapes (`R&amp;D` renders
+// literally). Decode the five entities in a SINGLE left-to-right pass
+// before pushing text nodes — a single pass guarantees `&amp;lt;` decodes
+// to the literal text `&lt;` (one level), never to `<`.
+const ENTITY_RE = /&(amp|lt|gt|quot|#39);/g;
+const ENTITY_CHAR: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  "#39": "'",
+};
+
+function decodeWireEntities(text: string): string {
+  return text.replace(ENTITY_RE, (m) => ENTITY_CHAR[m.slice(1, -1)] ?? m);
+}
+
 function splitSentinels(snippet: string): ReactNode[] {
   const out: ReactNode[] = [];
   const parts = snippet.split(SEARCH_SENTINEL_START);
-  out.push(parts[0]);
+  out.push(decodeWireEntities(parts[0]));
   for (let i = 1; i < parts.length; i++) {
     const [hit, rest] = parts[i].split(SEARCH_SENTINEL_END);
     if (rest === undefined) {
       // Unbalanced sentinel — render literally, never silently drop text.
-      out.push(SEARCH_SENTINEL_START, parts[i]);
+      out.push(SEARCH_SENTINEL_START, decodeWireEntities(parts[i]));
     } else {
-      out.push(<mark key={`m${i}`}>{hit}</mark>, rest);
+      out.push(<mark key={`m${i}`}>{decodeWireEntities(hit)}</mark>, decodeWireEntities(rest));
     }
   }
   return out;
@@ -49,17 +75,17 @@ function splitMarks(snippet: string): ReactNode[] {
   while ((m = re.exec(snippet)) !== null) {
     const token = m[0].toLowerCase();
     if (token === "<mark>" && !open) {
-      out.push(snippet.slice(last, m.index));
+      out.push(decodeWireEntities(snippet.slice(last, m.index)));
       open = true;
       last = m.index + m[0].length;
     } else if (token === "</mark>" && open) {
-      out.push(<mark key={`m${key++}`}>{snippet.slice(last, m.index)}</mark>);
+      out.push(<mark key={`m${key++}`}>{decodeWireEntities(snippet.slice(last, m.index))}</mark>);
       open = false;
       last = m.index + m[0].length;
     }
     // Stray/duplicate tokens fall through and stay in the text verbatim.
   }
-  out.push((open ? "<mark>" : "") + snippet.slice(last));
+  out.push((open ? "<mark>" : "") + decodeWireEntities(snippet.slice(last)));
   return out;
 }
 

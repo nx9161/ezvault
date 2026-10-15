@@ -291,7 +291,10 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
       });
       // Duplicate "ask": the server reports duplicates via `rejected` with a
       // duplicate reason; "import anyway" re-submits those keys as keep_both.
-      // (Round-trip shape pending backend confirmation — flagged.)
+      // Ask protocol (accepted design — QA round 1 adjudication): a stateless
+      // API cannot do interactive per-file prompts, so this client two-phase
+      // (first pass 'skip', per-file dialog, kept subset as 'keep_both')
+      // IS the ask implementation, not a stopgap.
       const dupes = result.rejected.filter((r) => /duplicat/i.test(r.reason));
       if (dupes.length > 0 && duplicatePolicy === "ask") {
         setDupeAsk({

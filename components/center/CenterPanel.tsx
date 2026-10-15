@@ -27,13 +27,11 @@ import { get, post } from "@/lib/api/client";
 import {
   runCommand,
   trashSubjectsOp,
-  mergeItemsOp,
   attachTagsOp,
   type OpContext,
 } from "@/lib/commands/ops";
 import { useOpContext } from "@/components/sidebar/Sidebar";
 import { Menu, MenuItem, MenuLabel } from "@/components/ui/Menu";
-import { ConfirmDialog } from "@/components/ui/Dialog";
 import { ErrorCard, SkeletonCards, SkeletonRows } from "@/components/ui/Feedback";
 import { renderSnippet } from "@/lib/search-snippet";
 import type { Item, Tag } from "@/lib/api/types";
@@ -430,7 +428,6 @@ function ItemTable({ items, projectId }: { items: Item[]; projectId: string }) {
 
 function SelectionToolbar({
   projectId,
-  items,
   ctx,
 }: {
   projectId: string;
@@ -447,9 +444,6 @@ function SelectionToolbar({
   const { data: lists } = useLists(projectId);
   const tags = tagListOf(tagsData);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number; kind: "tags" | "lists" } | null>(null);
-  const [mergeOpen, setMergeOpen] = useState(false);
-
-  const selected = items.filter((i) => selectedIds.includes(i.id));
 
   async function trashSelected() {
     await runCommand(ctx, trashSubjectsOp(ctx, selectedIds, "user", t("trashItems")), ["items", "trash", "meter"]);
@@ -465,8 +459,9 @@ function SelectionToolbar({
         {t("deselect")}
       </button>
       {selectedIds.length >= 2 ? (
-        <button type="button" className="ez-btn ez-btn--sm" onClick={() => setMergeOpen(true)} title={t("mergeHint")}>
-          {t("merge")}
+        // Wave-2 feature: visibly gated, never a functional-looking dialog.
+        <button type="button" className="ez-btn ez-btn--sm" disabled title={t("mergeWave2Hint")}>
+          {t("mergeWave2")}
         </button>
       ) : null}
       <button
@@ -541,21 +536,6 @@ function SelectionToolbar({
             </MenuItem>
           ))}
         </Menu>
-      ) : null}
-      {mergeOpen ? (
-        <ConfirmDialog
-          title={t("mergeTitle", { count: selectedIds.length })}
-          body={t("mergeBody", { title: selected[0]?.title ?? "" })}
-          confirmLabel={t("merge")}
-          onCancel={() => setMergeOpen(false)}
-          onConfirm={async () => {
-            setMergeOpen(false);
-            const [target, ...rest] = selectedIds;
-            await runCommand(ctx, mergeItemsOp(ctx, selectedIds, target), ["items", "trash", "meter"]);
-            setSelectedIds([target]);
-            void rest;
-          }}
-        />
       ) : null}
     </div>
   );

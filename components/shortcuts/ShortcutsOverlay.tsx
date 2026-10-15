@@ -20,7 +20,6 @@ export default function ShortcutsOverlay() {
     [t("focusSearch"), "Ctrl/⌘ K"],
     [t("undo"), "Ctrl/⌘ Z"],
     [t("redo"), "Ctrl/⌘ Shift Z / Ctrl Y"],
-    [t("merge"), "Ctrl/⌘ Shift M"],
     [t("toggleView"), "V"],
     [t("trash"), "Delete"],
     [t("rotate"), "R / Ctrl Space"],
