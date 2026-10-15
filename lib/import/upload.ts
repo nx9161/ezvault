@@ -8,7 +8,7 @@
 // /complete links each artifact to its original via `conversions`.
 
 import { post, newClientOpId } from "../api/client";
-import type { PresignGrant } from "@/lib/types";
+import type { PresignGrant, FolderSessionFile, FolderSessionResponse } from "@/lib/types";
 
 export interface PresignFile {
   sha256: string;
@@ -27,6 +27,13 @@ export interface CompleteFile {
   /** For browser-decoded artifacts: the original file's staged key. */
   conversion_of?: string;
   relative_path?: string;
+  /**
+   * Folder-session grant's list_id: the server files the new photo into
+   * this list in the SAME transaction (F2). Primary filing path — the
+   * server only falls back to relativePath → dir_lists when listId is
+   * absent on a folder job.
+   */
+  listId?: string | null;
 }
 
 export interface CompleteResult {
@@ -84,11 +91,18 @@ export async function completeImport(
   } = {},
 ): Promise<CompleteResult> {
   // The `files` form (key + 64-hex sha256 + filename) — the server verifies
-  // the staged bytes against the claimed sha256 (B18).
+  // the staged bytes against the claimed sha256 (B18). Per-file listId is
+  // the primary filing path (F2); relative_path is stored as audit only.
   return post<CompleteResult>("/api/import/complete", {
     job_id: jobId,
     project_id: projectId,
-    files: files.map((f) => ({ key: f.key, sha256: f.sha256, filename: f.filename })),
+    files: files.map((f) => ({
+      key: f.key,
+      sha256: f.sha256,
+      filename: f.filename,
+      ...(f.relative_path ? { relative_path: f.relative_path } : {}),
+      ...(f.listId ? { listId: f.listId } : {}),
+    })),
     conversions: files
       .filter((f) => f.conversion_of)
       .map((f) => ({ key: f.key, conversion_of: f.conversion_of! })),
@@ -99,15 +113,19 @@ export async function completeImport(
 }
 
 /**
- * Folder upload: register relative paths first so the server mirrors the
- * directory tree as nested lists (FolderSessionResponse.mapping).
+ * Folder upload: register the hashed files so the server mirrors the
+ * directory tree as nested lists and mints per-file presigned PUT grants.
+ * Each grant carries the list_id its photo files into — the client sends
+ * that back as per-file listId on /complete (F2 primary path).
+ *
+ * Called AFTER hashing: the server requires per-file sha256/size/mimetype.
  */
 export async function folderSession(
   projectId: string,
-  paths: string[],
-): Promise<{ job_id: string; mapping: Record<string, string> }> {
-  return post<{ job_id: string; mapping: Record<string, string> }>(
+  files: FolderSessionFile[],
+): Promise<FolderSessionResponse> {
+  return post<FolderSessionResponse>(
     "/api/import/folder-session",
-    { project_id: projectId, paths, clientOpId: newClientOpId() },
+    { project_id: projectId, files, clientOpId: newClientOpId() },
   );
 }

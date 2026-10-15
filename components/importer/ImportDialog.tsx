@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Import dialog: Files / Folder / JSON-LD tabs (+ .tpy → wizard).
 // Review → per-file sha256 (SubtleCrypto) → HEIC→JPEG in-browser (libheif-js,
-// B17) + exifr EXIF → presign batch → XHR PUT with progress → /complete
+// B17) + exifr EXIF → stage (presign batch, or folder-session for folder
+// picks — mirrors the dir tree as nested lists and returns per-file grants
+// with list_id) → XHR PUT with progress → /complete (per-file listId, F2)
 // → job polling (retry/cancel) → ONE compound undo command.
 // Design §2.1; architecture §2.11; ADR-2.16.
 
@@ -103,10 +105,10 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
     (project?.duplicate_policy as "skip" | "keep_both" | "ask") ?? "skip",
   );
   const [jobId, setJobId] = useState<string | null>(null);
-  // Folder uploads: the server mirrors the directory tree as nested lists
-  // (folder-session); per-file list filing is a backend open question —
-  // the mapping is kept for display until the contract settles.
-  const [folderMapping, setFolderMapping] = useState<Record<string, string> | null>(null);
+  // Folder uploads: the dir → { list_id } mapping minted by folder-session
+  // (called in run(), after hashing — the server needs per-file sha256).
+  // Shown as a "N folder lists created" note once the run starts.
+  const [folderMapping, setFolderMapping] = useState<Record<string, { list_id: string }> | null>(null);
   const [dupeAsk, setDupeAsk] = useState<{
     duplicates: { sha256: string; filename: string; key: string }[];
     files: CompleteFile[];
@@ -162,13 +164,8 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
       file: f,
       relativePath: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name,
     }));
-    // Build the nested-list tree server-side first (design §2.1 folder step).
-    const paths = entries.map((e) => e.relativePath).filter(Boolean) as string[];
-    if (paths.length > 0) {
-      folderSession(projectId, paths)
-        .then((r) => setFolderMapping(r.mapping))
-        .catch(() => setFolderMapping(null));
-    }
+    // The nested-list tree is built server-side in run(), after hashing
+    // (folder-session needs per-file sha256/size/mimetype) — see step 2.
     addFiles(entries);
     setTab("files");
   }
@@ -221,27 +218,74 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
         setRunning(false);
         return;
       }
-      // 2. Presign batch (originals + HEIC JPEG artifacts).
-      const presignFiles = ready.flatMap((f) => {
-        const base = {
-          sha256: f.sha256,
-          size: f.file.size,
-          mimetype: f.file.type || "application/octet-stream",
-          filename: f.file.name,
-        };
-        return f.artifact && f.artifactSha256
-          ? [base, { sha256: f.artifactSha256, size: f.artifact.size, mimetype: "image/jpeg", filename: f.file.name.replace(/\.[^.]+$/, ".jpg") }]
-          : [base];
-      });
-      const { job_id: presignJobId, grants } = await presignBatch(projectId, presignFiles);
-      const byHash = new Map(grants.map((u) => [u.sha256, u]));
+      // 2. Stage uploads.
+      // Folder batch (every file carries a folder-relative path): register
+      // with folder-session — the server mirrors the directory tree as
+      // nested lists and returns per-file PUT grants, each carrying the
+      // list_id its photo files into. That grant list_id is sent back as
+      // per-file listId on /complete (F2 primary path). Plain file batches
+      // use the presign endpoint and land in All Items.
+      const normSessionPath = (p: string) => p.replace(/\\/g, "/").replace(/^\/+/, "");
+      const folderBatch = ready.every((f) => !!f.relativePath);
+      const listIdByKey = new Map<string, string | null>();
+      const grantBySha = new Map<string, { key: string; url: string }>();
+      const grantByPath = new Map<string, { key: string; url: string }>();
+      let completeJobId: string;
+      if (folderBatch) {
+        const sessionFiles = ready.flatMap((f) => {
+          const path = normSessionPath(f.relativePath!);
+          const main = {
+            path,
+            mimetype: f.file.type || "application/octet-stream",
+            size: f.file.size,
+            sha256: f.sha256,
+          };
+          // Browser-decoded HEIC→JPEG artifacts need their own staged key:
+          // register under a collision-proof pseudo-path in the same dir.
+          return f.artifact && f.artifactSha256
+            ? [main, { path: `${path}.conv.jpg`, mimetype: "image/jpeg", size: f.artifact.size, sha256: f.artifactSha256 }]
+            : [main];
+        });
+        const session = await folderSession(projectId, sessionFiles);
+        completeJobId = session.job_id;
+        setFolderMapping(session.mapping);
+        for (const g of session.grants) {
+          const grant = { key: g.key, url: g.url };
+          grantByPath.set(g.path, grant);
+          listIdByKey.set(g.key, g.list_id);
+        }
+      } else {
+        const presignFiles = ready.flatMap((f) => {
+          const base = {
+            sha256: f.sha256,
+            size: f.file.size,
+            mimetype: f.file.type || "application/octet-stream",
+            filename: f.file.name,
+          };
+          return f.artifact && f.artifactSha256
+            ? [base, { sha256: f.artifactSha256, size: f.artifact.size, mimetype: "image/jpeg", filename: f.file.name.replace(/\.[^.]+$/, ".jpg") }]
+            : [base];
+        });
+        const { job_id: presignJobId, grants } = await presignBatch(projectId, presignFiles);
+        completeJobId = presignJobId;
+        for (const u of grants) grantBySha.set(u.sha256.toLowerCase(), { key: u.key, url: u.url });
+      }
 
-      // 3. PUT each file.
+      // 3. PUT each file. Folder batches resolve grants by session path
+      // (identical bytes in different folders keep their own grants);
+      // presign batches resolve by sha256 as before.
       for (const f of ready) {
         if (signal.aborted) throw new Error("cancelled");
-        const up = byHash.get(f.sha256);
-        const upArt = f.artifact && f.artifactSha256 ? byHash.get(f.artifactSha256) : undefined;
-        if (!up) throw new Error("presign missing");
+        const grantFor = (artifact: boolean) => {
+          if (folderBatch) {
+            return grantByPath.get(normSessionPath(f.relativePath!) + (artifact ? ".conv.jpg" : ""));
+          }
+          const sha = artifact ? f.artifactSha256! : f.sha256;
+          return grantBySha.get(sha.toLowerCase());
+        };
+        const up = grantFor(false);
+        const upArt = f.artifact && f.artifactSha256 ? grantFor(true) : undefined;
+        if (!up) throw new Error("staging missing");
         patchQueue(f.localId, { status: "uploading", progress: 0.45 });
         await putWithProgress(up.url, f.file, f.file.type || "application/octet-stream",
           (loaded, total) => patchQueue(f.localId, { progress: 0.45 + 0.35 * (loaded / total) }), signal);
@@ -264,6 +308,10 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
           mimetype: f.file.type || "application/octet-stream",
           filename: f.file.name,
           relative_path: f.relativePath,
+          // F2 primary path: the folder-session grant's list_id. Absent for
+          // plain file batches (land in All Items); conversion artifacts are
+          // decode sources, never filed as their own photos.
+          listId: listIdByKey.get(f.key!) ?? undefined,
         };
         return f.artifactKey && f.artifactSha256
           ? [main, {
@@ -282,7 +330,7 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
         const qf = ready.find((r) => r.key === f.key || r.artifactKey === f.key);
         if (qf?.exif && !f.conversion_of) exif[f.key] = qf.exif;
       }
-      const result = await completeImport(projectId, presignJobId, completeFiles, {
+      const result = await completeImport(projectId, completeJobId, completeFiles, {
         // 'ask' is a client-side two-phase: first pass as 'skip' so the
         // server reports duplicates as rejected (reason 'duplicate_skipped');
         // the dialog below then re-submits the kept subset as 'keep_both'.
@@ -304,7 +352,7 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
             key: d.key,
           })),
           files: completeFiles,
-          jobId: presignJobId,
+          jobId: completeJobId,
         });
         setDupeDecisions(
           Object.fromEntries(dupes.map((d) => [d.key, "skip" as const])),

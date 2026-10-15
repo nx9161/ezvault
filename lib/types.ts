@@ -650,18 +650,46 @@ export interface ImportProcessResponse extends MutationMeta {
   photo: Photo;
 }
 
+/**
+ * One file registered at POST /api/import/folder-session. The server
+ * mirrors every directory part as nested lists, mints per-file presigned
+ * PUT grants, and stashes dir → list_id in the folder job's checkpoint.
+ */
+export interface FolderSessionFile {
+  /** Folder-relative path, e.g. "a/b/photo.jpg". */
+  path: string;
+  mimetype: string;
+  size: number;
+  sha256: string;
+}
+
+/** Per-file grant returned by POST /api/import/folder-session. */
+export interface FolderSessionGrant {
+  /** Client's relative path (server-normalized). */
+  path: string;
+  /** Server-minted staged key: uploads/{jobId}/{uuid}.{ext} */
+  key: string;
+  /** Presigned PUT URL (15-min TTL). */
+  url: string;
+  expires_at: string;
+  content_type: string;
+  sha256: string;
+  /** list_id of the parent directory's mirrored nested list (null at root). */
+  list_id: UUID | null;
+}
+
 export interface FolderSessionRequest {
   project_id: UUID;
-  /** Relative paths, e.g. ["a/b/photo.jpg"]. Server creates nested lists mirroring dirs. */
-  paths: string[];
+  /** Files to register; server mirrors dirs as nested lists and mints PUT grants. */
+  files: FolderSessionFile[];
   clientOpId?: UUID;
 }
 
 export interface FolderSessionResponse extends MutationMeta {
   job_id: UUID;
-  /** path → list_id of its parent directory list */
-  mapping: Record<string, UUID>;
-  lists: ListNode[];
+  /** dir path → { list_id } of the mirrored nested list */
+  mapping: Record<string, { list_id: UUID }>;
+  grants: FolderSessionGrant[];
 }
 
 export type JobStatus = 'queued' | 'running' | 'paused_cpu' | 'failed' | 'done' | 'cancelled';

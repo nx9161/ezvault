@@ -5,8 +5,9 @@
 //
 // Retention wires the three radios to POST /api/projects/[id]/storage/compress
 // with { mode, photoIds? }: 'flagged-only' compresses only the photos the
-// owner ticked in the picker below; 'prune' deletes regenerable previews and
-// needs an explicit irreversible confirm. A 503 'cpu_paused' response shows
+// owner ticked in the picker below; 'prune' permanently deletes the bytes of
+// everything already in Trash (originals + thumbs from R2) and needs an
+// explicit irreversible confirm. A 503 'cpu_paused' response shows
 // the existing budget banner copy (the run is refused, not failed).
 
 "use client";
