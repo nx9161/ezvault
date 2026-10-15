@@ -1,0 +1,113 @@
+// SPDX-License-Identifier: MIT
+import 'server-only';
+
+/**
+ * lib/cpu-budget.ts — rolling 30-day CPU guard (phase2 §8, ADR-2.23).
+ *
+ * - Per-invocation `process.cpuUsage()` deltas are charged in the same
+ *   transaction as the photo commit (to import_jobs.cpu_seconds AND the
+ *   rolling window).
+ * - Threshold 80% (11,520 s of the 14,400 s cap) → window paused = TRUE;
+ *   queued/running jobs flip to paused_cpu; guard-checked routes answer
+ *   503 + Retry-After + resume date.
+ * - Uploads are NEVER gated (presigned PUTs cost ~zero CPU).
+ * - Resume is lazy: the window rolls on any guard check + the nightly cron
+ *   ticks it.
+ */
+
+import { sql } from './db/index.js';
+import { HttpError } from './api/route-utils.js';
+
+export const CPU_CAP_S = 14400; // 4 CPU-hours / 30d (Vercel Hobby mirror)
+export const CPU_GUARD_S = 11520; // 80% pause threshold
+
+export interface CpuWindow {
+  id: string;
+  window_start: string;
+  window_end: string;
+  cpu_seconds: number;
+  paused: boolean;
+}
+
+/** Fetch the active window, rolling it lazily when expired/missing. */
+export async function currentWindow(): Promise<CpuWindow> {
+  const rows = await sql()`
+    SELECT id, window_start, window_end, cpu_seconds, paused
+    FROM cpu_budget_windows
+    ORDER BY window_end DESC LIMIT 1`;
+  const w = (rows[0] as unknown as CpuWindow | undefined);
+  const now = new Date();
+  if (!w || new Date(w.window_end) <= now) {
+    const created = await sql()`
+      INSERT INTO cpu_budget_windows (window_start, window_end, cpu_seconds, paused)
+      VALUES (now(), now() + interval '30 days', 0, false)
+      RETURNING id, window_start, window_end, cpu_seconds, paused`;
+    return created[0] as unknown as CpuWindow;
+  }
+  return { ...w, cpu_seconds: Number(w.cpu_seconds) };
+}
+
+export class CpuPausedError extends HttpError {
+  constructor(public resumes: string) {
+    super(503, 'cpu_paused', 'CPU budget paused — processing resumes at window roll');
+    (this as unknown as { retryAfterSec: number }).retryAfterSec = Math.max(
+      1,
+      Math.ceil((new Date(resumes).getTime() - Date.now()) / 1000),
+    );
+  }
+}
+
+/**
+ * Guard checked BEFORE CPU-heavy work (process, bake, compress, tpy analyze/run).
+ * Uploads never call this.
+ */
+export async function checkCpuGuard(): Promise<CpuWindow> {
+  const w = await currentWindow();
+  if (w.paused) throw new CpuPausedError(new Date(w.window_end).toISOString());
+  if (w.cpu_seconds >= CPU_GUARD_S) {
+    await sql()`UPDATE cpu_budget_windows SET paused = true WHERE id = ${w.id}`;
+    // Flip queued/running jobs to paused_cpu (uploads keep working).
+    await sql()`UPDATE import_jobs SET status = 'paused_cpu', updated_at = now()
+                WHERE status IN ('queued','running')`;
+    throw new CpuPausedError(new Date(w.window_end).toISOString());
+  }
+  return w;
+}
+
+/**
+ * Charge CPU seconds to the active window (and optionally a job). Auto-pauses
+ * at the guard threshold. Single statements — call AFTER the work commits.
+ */
+export async function chargeCpu(seconds: number, jobId?: string): Promise<void> {
+  if (!(seconds > 0)) return;
+  const w = await currentWindow();
+  await sql()`
+    UPDATE cpu_budget_windows
+    SET cpu_seconds = cpu_seconds + ${seconds},
+        paused = (cpu_seconds + ${seconds} >= ${CPU_GUARD_S})
+    WHERE id = ${w.id}`;
+  if (jobId) {
+    await sql()`UPDATE import_jobs
+                SET cpu_seconds = cpu_seconds + ${seconds}, updated_at = now()
+                WHERE id = ${jobId}`;
+  }
+}
+
+/** GET /api/cpu-budget payload. */
+export async function getCpuBudget(): Promise<{
+  used_s: number;
+  cap_s: number;
+  guard_s: number;
+  paused: boolean;
+  resumes: string | null;
+}> {
+  const w = await currentWindow();
+  const paused = w.paused || w.cpu_seconds >= CPU_GUARD_S;
+  return {
+    used_s: Math.round(w.cpu_seconds * 100) / 100,
+    cap_s: CPU_CAP_S,
+    guard_s: CPU_GUARD_S,
+    paused,
+    resumes: paused ? new Date(w.window_end).toISOString() : null,
+  };
+}

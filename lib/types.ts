@@ -532,6 +532,12 @@ export interface ImportCompleteRequest {
   project_id: UUID;
   /** Keys the client actually PUT (subset of grants is fine). */
   keys: string[];
+  /**
+   * Browser-decoded HEIC/HEIF/AVIF → JPEG conversion artifacts.
+   * Each entry links the artifact's staged key to the original's staged key;
+   * /process uses the artifact as the decode source (ADR-2.16).
+   */
+  conversions?: Array<{ key: string; conversion_of: string }>;
   /** Client-extracted EXIF for HEIC files, keyed by staged key. */
   exif?: Record<string, Record<string, unknown>>;
   duplicate_policy?: DuplicatePolicy;
