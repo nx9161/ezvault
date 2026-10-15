@@ -471,7 +471,7 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
       });
       setJobId(res.job_id);
       setRunning(true);
-      setOpen(false);
+      // D-M11b: stay open and show the job-progress state below (no auto-close).
       pushToast({ message: t("processing") });
     } catch (err) {
       pushToast({ message: err instanceof Error ? err.message : "import failed", kind: "error" });
@@ -481,7 +481,15 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
   if (!open) return null;
 
   return (
-    <Dialog title={t("title")} onClose={() => (running ? undefined : setOpen(false))} wide>
+    <Dialog
+      title={t("title")}
+      // D-M11b: close is always enabled during processing. Known limitation:
+      // closing unmounts the dialog and its useJob polling, so the
+      // done/failed toast path is lost on manual close — same as file
+      // imports today; wave-2 moves job tracking to the ui store.
+      onClose={() => setOpen(false)}
+      wide
+    >
       <div className="ez-tabs" role="tablist" aria-label={t("title")} style={{ marginTop: 0 }}>
         {(["files", "folder", "jsonld"] as Tab[]).map((id) => (
           <button
@@ -537,7 +545,7 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
           <p className="ez-notice">{t("folderNote")}</p>
         </div>
       ) : null}
-      {tab === "jsonld" ? (
+      {tab === "jsonld" && !(job && running) ? (
         <div style={{ margin: "12px 0" }}>
           <input
             ref={jsonldInputRef}
