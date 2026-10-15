@@ -238,6 +238,8 @@ export const HOTKEY_REGISTRY: HotkeyEntry[] = [
     },
   },
   // ---------- viewer (docs-only; bound in PhotoViewer onViewerKeyDown) ----------
+  // W2-A: zoom/pan/fit bindings moved to the lightbox (its own keymap);
+  // only the edit-surface bindings (rotate, draw) remain here.
   {
     id: "rotate",
     keys: ["r", "mod+space"],
@@ -247,35 +249,11 @@ export const HOTKEY_REGISTRY: HotkeyEntry[] = [
     hint: "R / Ctrl Space",
   },
   {
-    id: "fitWindow",
-    keys: "0",
-    scope: "viewer",
-    group: "viewer",
-    labelKey: "fitWindow",
-    hint: "0",
-  },
-  {
-    id: "actualPixels",
-    keys: "1",
-    scope: "viewer",
-    group: "viewer",
-    labelKey: "actualPixels",
-    hint: "1",
-  },
-  {
     id: "drawSelection",
     keys: "s",
     scope: "viewer",
     group: "viewer",
     labelKey: "drawSelection",
     hint: "S",
-  },
-  {
-    id: "pan",
-    keys: ["arrowleft", "arrowright", "arrowup", "arrowdown"],
-    scope: "viewer",
-    group: "viewer",
-    labelKey: "pan",
-    hint: "← ↑ ↓ →",
   },
 ];

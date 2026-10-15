@@ -123,8 +123,8 @@ export function ZoomOutIcon({ size = 16, ...props }: IconProps) {
   ));
 }
 
+// Counter-clockwise.
 export function RotateIcon({ size = 16, ...props }: IconProps) {
-  // Counter-clockwise.
   return base(size, props, (
     <>
       <path d="M1 4v6h6" />
@@ -282,4 +282,33 @@ export function VaultMark({ size = 22, ...props }: IconProps) {
       <rect x="13.5" y="13.5" width="9" height="9" />
     </svg>
   );
+}
+
+export function FullscreenIcon({ size = 16, ...props }: IconProps) {
+  return base(size, props, (
+    <>
+      <path d="M4 9V4h5" />
+      <path d="M20 9V4h-5" />
+      <path d="M4 15v5h5" />
+      <path d="M20 15v5h-5" />
+    </>
+  ));
+}
+
+export function EyeIcon({ size = 16, ...props }: IconProps) {
+  return base(size, props, (
+    <>
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ));
+}
+
+export function EyeOffIcon({ size = 16, ...props }: IconProps) {
+  return base(size, props, (
+    <>
+      <path d="M2.5 12S6 5.5 12 5.5c2.2 0 4.2.8 5.8 1.9M21.5 12S18 18.5 12 18.5c-2.2 0-4.2-.8-5.8-1.9" />
+      <path d="M4 4l16 16" />
+    </>
+  ));
 }

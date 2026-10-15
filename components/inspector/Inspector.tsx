@@ -7,7 +7,7 @@
 import { useEffect, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { useUiStore } from "@/lib/store/ui";
-import { usePhotos, useSelections, thumbUrl } from "@/lib/api/hooks";
+import { usePhotos, useSelections, useItem, thumbUrl } from "@/lib/api/hooks";
 import { editsDirty } from "@/lib/api/types";
 import { runCommand, trashSubjectsOp } from "@/lib/commands/ops";
 import { useOpContext } from "@/components/sidebar/Sidebar";
@@ -95,6 +95,7 @@ function SingleItemInspector({ projectId, itemId }: { projectId: string; itemId:
 
   const { data: photosData, error: photosError, isLoading: photosLoading, mutate: mutatePhotos } = usePhotos(projectId, itemId);
   const photos = photosData?.items ?? [];
+  const { data: item } = useItem(projectId, itemId);
   const photo = useMemo(() => {
     if (photos.length === 0) return null;
     return photos.find((p) => p.id === activePhotoId) ?? photos[0];
@@ -201,9 +202,12 @@ function SingleItemInspector({ projectId, itemId }: { projectId: string; itemId:
             <PhotoViewer
               projectId={projectId}
               photo={photo}
+              photos={photos}
+              itemTitle={item?.title ?? ""}
               selections={selections}
               activeSelectionId={activeSelectionId}
               onSelectSelection={setActiveSelectionId}
+              onActivePhotoChange={setActivePhotoId}
               onSelectionsChanged={() => mutateSelections()}
               ctx={ctx}
             />

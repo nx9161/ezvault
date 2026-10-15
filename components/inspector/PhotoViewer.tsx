@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: MIT
-// Canvas-2D photo viewer: two stacked canvases (photo + selection overlay),
-// rAF transforms held in a REF (never the store), navigator minimap.
-// Edit preview: angle/mirror → canvas transform; brightness/contrast/
-// hue/saturation/negative → ctx.filter; sharpen is NOT previewed
-// (tolerance contract — bake is the source of truth).
-// a11y: role="img" + aria-label, real range input for zoom, selections
-// mirrored in the Selections tab list.
+// Canvas-2D photo editor: photo + selection overlay + non-destructive edits.
+// Viewing (zoom/pinch/fullscreen/thumbnails/captions/download/counter) moved
+// to the yet-another-react-lightbox swap (W2-A, components/viewer/) — the
+// hand-rolled zoom/gesture code was deleted with that swap. This surface
+// keeps: selection drawing, edits (angle/mirror/color), revert.
+// rAF transforms held in a REF (never the store). Navigator minimap and
+// 1:1 original loading were zoom-only affordances — removed with the zoom.
+// a11y: role="img" + aria-label; selections mirrored in the Selections tab
+// list and (W2-D SHOULD-22) the tab strip under the viewer.
 
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { useUiStore } from "@/lib/store/ui";
-import { originalUrl, thumbUrl } from "@/lib/api/hooks";
+import { thumbUrl } from "@/lib/api/hooks";
 import { post } from "@/lib/api/client";
 import {
   runCommand,
@@ -23,23 +25,22 @@ import {
 import { DEFAULT_EDITS, editsDirty, adaptSelection, selectionWire, type Photo, type PhotoEdits, type Selection } from "@/lib/api/types";
 import { ConfirmDialog } from "@/components/ui/Dialog";
 import {
-  ZoomInIcon,
-  ZoomOutIcon,
   RotateIcon,
   RotateCwIcon,
   SelectionDrawIcon,
+  FullscreenIcon,
 } from "@/components/ui/icons";
 
-type FitMode = "fit" | "width" | "one";
+// Lazy chunk — zero first-load cost; loads on first open.
+const PhotoLightbox = dynamic(() => import("@/components/viewer/PhotoLightbox"), {
+  ssr: false,
+});
 
 interface Transform {
   scale: number;
   tx: number; // photo-center x in css px
   ty: number; // photo-center y in css px
 }
-
-/** In-memory original cache for the session (1:1 zoom). */
-const originalCache = new Map<string, ImageBitmap>();
 
 /** D-E6: selection rects read the live theme accent (cached per theme). */
 let cachedTheme: string | null = null;
@@ -74,12 +75,6 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-async function loadOriginalBitmap(url: string): Promise<ImageBitmap> {
-  const res = await fetch(url);
-  const blob = await res.blob();
-  return createImageBitmap(blob);
-}
-
 function colorFilter(e: PhotoEdits): string {
   const parts = [
     `brightness(${(1 + e.brightness / 100).toFixed(3)})`,
@@ -94,17 +89,26 @@ function colorFilter(e: PhotoEdits): string {
 export default function PhotoViewer({
   projectId,
   photo,
+  photos,
+  itemTitle,
   selections,
   activeSelectionId,
   onSelectSelection,
+  onActivePhotoChange,
   onSelectionsChanged,
   ctx,
 }: {
   projectId: string;
   photo: Photo;
+  /** Sibling photos of the item — the lightbox slide set. */
+  photos: Photo[];
+  /** Item title for lightbox captions (falls back to filename). */
+  itemTitle: string;
   selections: Selection[];
   activeSelectionId: string | null;
   onSelectSelection: (id: string | null) => void;
+  /** Sync the active photo when the lightbox closes on another slide. */
+  onActivePhotoChange: (photoId: string) => void;
   onSelectionsChanged: () => void;
   ctx: OpContext;
 }) {
@@ -113,27 +117,26 @@ export default function PhotoViewer({
   const frameRef = useRef<HTMLDivElement>(null);
   const baseRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
-  const navRef = useRef<HTMLCanvasElement>(null);
 
   const [frameSize, setFrameSize] = useState({ w: 0, h: 0 });
-  const [fitMode, setFitMode] = useState<FitMode>("fit");
-  const [zoomPct, setZoomPct] = useState(100);
   const [drawing, setDrawing] = useState(false);
   const [confirmRevert, setConfirmRevert] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  /** W2-A: lightbox open — holds the controlled slide index. */
+  const [lbIndex, setLbIndex] = useState<number | null>(null);
 
   const [edits, setEdits] = useState<PhotoEdits>({ ...DEFAULT_EDITS, ...(photo.edits ?? {}) });
   const gestureBefore = useRef<PhotoEdits | null>(null);
   /** last server-known edits (gesture diffing must not mutate the SWR object) */
   const serverEdits = useRef<PhotoEdits>({ ...DEFAULT_EDITS, ...(photo.edits ?? {}) });
 
+  // The edit surface always renders the photo fit-to-frame. Zooming,
+  // panning, and 1:1 live in the lightbox now (W2-A swap).
   const transform = useRef<Transform>({ scale: 1, tx: 0, ty: 0 });
-  const imgRef = useRef<{ thumb?: HTMLImageElement; orig?: ImageBitmap }>({});
+  const imgRef = useRef<{ thumb?: HTMLImageElement }>({});
   const drawQueued = useRef(false);
   const drawRect = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
-  const panRef = useRef<{ sx: number; sy: number; tx: number; ty: number } | null>(null);
   const photoIdRef = useRef(photo.id);
-  const setViewerZoom = useUiStore((s) => s.setViewerZoom);
 
   const rotated = edits.angle % 180 !== 0;
   const pw = rotated ? photo.height : photo.width;
@@ -152,7 +155,7 @@ export default function PhotoViewer({
       .then((img) => {
         if (cancelled) return;
         imgRef.current.thumb = img;
-        applyFit("fit");
+        fitToFrame();
         requestDraw();
       })
       .catch(() => {
@@ -176,37 +179,17 @@ export default function PhotoViewer({
     return () => ro.disconnect();
   }, []);
 
-  const fitScale = useCallback(
-    (mode: FitMode): number => {
-      const { w, h } = frameSize;
-      if (w === 0 || h === 0 || pw === 0) return 1;
-      if (mode === "one") return 1;
-      if (mode === "width") return w / pw;
-      return Math.min(w / pw, h / ph);
-    },
-    [frameSize, pw, ph],
-  );
-
-  const applyFit = useCallback(
-    (mode: FitMode) => {
-      const s = fitScale(mode);
-      transform.current = {
-        scale: s,
-        tx: frameSize.w / 2,
-        ty: frameSize.h / 2,
-      };
-      setFitMode(mode);
-      const pct = Math.round(s * 100);
-      setZoomPct(pct);
-      setViewerZoom(pct);
-      requestDraw();
-    },
-    [fitScale, frameSize, setViewerZoom],
-  );
+  const fitToFrame = useCallback(() => {
+    const { w, h } = frameSize;
+    if (w === 0 || h === 0 || pw === 0) return;
+    const s = Math.min(w / pw, h / ph);
+    transform.current = { scale: s, tx: w / 2, ty: h / 2 };
+    requestDraw();
+  }, [frameSize, pw, ph]);
 
   // Re-fit when the frame resizes (keeps photo centered).
   useEffect(() => {
-    if (frameSize.w > 0 && imgRef.current.thumb) applyFit(fitMode);
+    if (frameSize.w > 0 && imgRef.current.thumb) fitToFrame();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frameSize.w, frameSize.h]);
 
@@ -270,7 +253,7 @@ export default function PhotoViewer({
     bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     bctx.fillStyle = "#0d0b08";
     bctx.fillRect(0, 0, cw, ch);
-    const src = imgRef.current.orig ?? imgRef.current.thumb;
+    const src = imgRef.current.thumb;
     const tr = transform.current;
     if (src) {
       bctx.save();
@@ -279,9 +262,7 @@ export default function PhotoViewer({
       bctx.rotate(rad);
       bctx.scale(edits.mirror ? -tr.scale : tr.scale, tr.scale);
       bctx.filter = colorFilter(edits);
-      const sw = src instanceof ImageBitmap ? src.width : (src as HTMLImageElement).naturalWidth;
-      const sh = src instanceof ImageBitmap ? src.height : (src as HTMLImageElement).naturalHeight;
-      bctx.drawImage(src, -sw / 2, -sh / 2, sw, sh);
+      bctx.drawImage(src, -src.naturalWidth / 2, -src.naturalHeight / 2, src.naturalWidth, src.naturalHeight);
       bctx.restore();
       bctx.filter = "none";
     }
@@ -318,44 +299,11 @@ export default function PhotoViewer({
       octx.strokeRect(Math.min(sx0, sx1), Math.min(sy0, sy1), Math.abs(sx1 - sx0), Math.abs(sy1 - sy0));
       octx.setLineDash([]);
     }
-
-    // Navigator minimap when zoomed past fit.
-    const nav = navRef.current;
-    if (nav) {
-      const fs = fitScale("fit");
-      if (tr.scale > fs * 1.05 && imgRef.current.thumb) {
-        nav.style.display = "block";
-        const nw = 132;
-        const nh = Math.round((nw * ch) / cw);
-        nav.width = nw;
-        nav.height = nh;
-        const nctx = nav.getContext("2d");
-        if (nctx) {
-          nctx.fillStyle = "#000";
-          nctx.fillRect(0, 0, nw, nh);
-          nctx.drawImage(imgRef.current.thumb, 0, 0, nw, nh);
-          // Viewport rect: map the visible screen corners back to photo
-          // space, then into minimap space.
-          const [pvx, pvy] = screenToPhoto(0, 0);
-          const [pvx2, pvy2] = screenToPhoto(cw, ch);
-          nctx.strokeStyle = solid;
-          nctx.lineWidth = 1.5;
-          nctx.strokeRect(
-            (pvx / photo.width) * nw,
-            (pvy / photo.height) * nh,
-            ((pvx2 - pvx) / photo.width) * nw,
-            ((pvy2 - pvy) / photo.height) * nh,
-          );
-        }
-      } else {
-        nav.style.display = "none";
-      }
-    }
   }
 
   useEffect(() => {
     requestDraw();
-  }, [requestDraw, selections, activeSelectionId, edits, frameSize, fitMode, zoomPct]);
+  }, [requestDraw, selections, activeSelectionId, edits, frameSize]);
 
   // --- edits: commit on gesture end (one undo command per gesture) ---
   async function commitEdits(next: PhotoEdits) {
@@ -389,108 +337,46 @@ export default function PhotoViewer({
     commitEdits(next);
   }
 
-  // --- zoom / pan ---
-  function zoomAt(cx: number, cy: number, factor: number) {
-    const tr = transform.current;
-    const next = Math.min(8, Math.max(0.05, tr.scale * factor));
-    const k = next / tr.scale;
-    tr.scale = next;
-    tr.tx = cx - (cx - tr.tx) * k;
-    tr.ty = cy - (cy - tr.ty) * k;
-    setFitMode("fit");
-    const pct = Math.round(next * 100);
-    setZoomPct(pct);
-    setViewerZoom(pct);
-    requestDraw();
-  }
-
-  function panBy(dx: number, dy: number) {
-    transform.current.tx += dx;
-    transform.current.ty += dy;
-    requestDraw();
-  }
-
-  async function goOneToOne() {
-    if (!originalCache.has(photo.id)) {
-      try {
-        const bmp = await loadOriginalBitmap(originalUrl(projectId, photo.id));
-        originalCache.set(photo.id, bmp);
-      } catch {
-        /* fall back to thumb */
-      }
-    }
-    const bmp = originalCache.get(photo.id);
-    if (bmp) imgRef.current.orig = bmp;
-    applyFit("one");
-  }
-
-  // --- pointer interactions ---
+  // --- selection drawing (pointer) ---
   function onOverlayPointerDown(e: React.PointerEvent) {
+    if (!drawing) return;
     const rect = overlayRef.current!.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
-    if (drawing) {
-      const [px, py] = screenToPhoto(sx, sy);
-      drawRect.current = { x0: px, y0: py, x1: px, y1: py };
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
-      return;
-    }
-    panRef.current = { sx: e.clientX, sy: e.clientY, tx: transform.current.tx, ty: transform.current.ty };
+    const [px, py] = screenToPhoto(sx, sy);
+    drawRect.current = { x0: px, y0: py, x1: px, y1: py };
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   }
 
   function onOverlayPointerMove(e: React.PointerEvent) {
+    if (!drawing || !drawRect.current) return;
     const rect = overlayRef.current!.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
-    if (drawing && drawRect.current) {
-      const [px, py] = screenToPhoto(sx, sy);
-      drawRect.current = { ...drawRect.current, x1: px, y1: py };
-      requestDraw();
-      return;
-    }
-    if (panRef.current) {
-      const dx = e.clientX - panRef.current.sx;
-      const dy = e.clientY - panRef.current.sy;
-      transform.current.tx = panRef.current.tx + dx;
-      transform.current.ty = panRef.current.ty + dy;
-      requestDraw();
-    }
+    const [px, py] = screenToPhoto(sx, sy);
+    drawRect.current = { ...drawRect.current, x1: px, y1: py };
+    requestDraw();
   }
 
-  async function onOverlayPointerUp(e: React.PointerEvent) {
-    if (drawing && drawRect.current) {
-      const { x0, y0, x1, y1 } = drawRect.current;
-      drawRect.current = null;
-      const x = Math.round(Math.min(x0, x1));
-      const y = Math.round(Math.min(y0, y1));
-      const w = Math.round(Math.abs(x1 - x0));
-      const h = Math.round(Math.abs(y1 - y0));
-      setDrawing(false);
-      if (w >= 8 && h >= 8) {
-        const n = selections.length + 1;
-        const created = await post(
-          `/api/projects/${projectId}/photos/${photo.id}/selections`,
-          selectionWire({ name: ts("newSelection", { n }), x, y, w, h }),
-        );
-        onSelectSelection(adaptSelection(created as never).id);
-        onSelectionsChanged();
-      } else {
-        requestDraw();
-      }
-      return;
-    }
-    panRef.current = null;
-  }
-
-  function onWheel(e: React.WheelEvent) {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      const rect = overlayRef.current!.getBoundingClientRect();
-      zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+  async function onOverlayPointerUp() {
+    if (!drawing || !drawRect.current) return;
+    const { x0, y0, x1, y1 } = drawRect.current;
+    drawRect.current = null;
+    const x = Math.round(Math.min(x0, x1));
+    const y = Math.round(Math.min(y0, y1));
+    const w = Math.round(Math.abs(x1 - x0));
+    const h = Math.round(Math.abs(y1 - y0));
+    setDrawing(false);
+    if (w >= 8 && h >= 8) {
+      const n = selections.length + 1;
+      const created = await post(
+        `/api/projects/${projectId}/photos/${photo.id}/selections`,
+        selectionWire({ name: ts("newSelection", { n }), x, y, w, h }),
+      );
+      onSelectSelection(adaptSelection(created as never).id);
+      onSelectionsChanged();
     } else {
-      e.preventDefault();
-      panBy(-e.deltaX, -e.deltaY);
+      requestDraw();
     }
   }
 
@@ -512,69 +398,41 @@ export default function PhotoViewer({
       rotateStep(-1);
     } else if (e.key === "s" || e.key === "S") {
       setDrawing(true);
-    } else if (e.key === "0") {
-      applyFit("fit");
-    } else if (e.key === "1") {
-      goOneToOne();
-    } else if (e.key.startsWith("Arrow")) {
-      const step = 48;
-      if (e.key === "ArrowLeft") panBy(step, 0);
-      else if (e.key === "ArrowRight") panBy(-step, 0);
-      else if (e.key === "ArrowUp") panBy(0, step);
-      else if (e.key === "ArrowDown") panBy(0, -step);
-      e.preventDefault();
     }
+  }
+
+  function openLightbox() {
+    const idx = Math.max(
+      0,
+      photos.findIndex((p) => p.id === photo.id),
+    );
+    setLbIndex(idx);
+  }
+
+  function closeLightbox() {
+    if (lbIndex !== null && photos[lbIndex] && photos[lbIndex].id !== photo.id) {
+      onActivePhotoChange(photos[lbIndex].id);
+    }
+    setLbIndex(null);
   }
 
   const ariaLabel = t("ariaLabel", {
     filename: photo.filename,
     width: photo.width,
     height: photo.height,
-    zoom: zoomPct,
   });
 
   return (
     <div>
       <div className="ez-viewer-toolbar" role="toolbar" aria-label="viewer" data-tour="viewer-toolbar">
-        <button type="button" className="ez-icon-btn" onClick={() => {
-          const r = overlayRef.current!.getBoundingClientRect();
-          zoomAt(r.width / 2, r.height / 2, 1.25);
-        }} aria-label={t("zoomIn")} title={t("zoomIn")}><ZoomInIcon size={15} /></button>
-        <button type="button" className="ez-icon-btn" onClick={() => {
-          const r = overlayRef.current!.getBoundingClientRect();
-          zoomAt(r.width / 2, r.height / 2, 1 / 1.25);
-        }} aria-label={t("zoomOut")} title={t("zoomOut")}><ZoomOutIcon size={15} /></button>
-        <input
-          type="range"
-          className="ez-range"
-          style={{ width: 110 }}
-          min={5}
-          max={800}
-          value={zoomPct}
-          onChange={(e) => {
-            const pct = Number(e.target.value);
-            const r = overlayRef.current!.getBoundingClientRect();
-            const tr = transform.current;
-            const next = pct / 100;
-            const k = next / tr.scale;
-            tr.scale = next;
-            tr.tx = r.width / 2 - (r.width / 2 - tr.tx) * k;
-            tr.ty = r.height / 2 - (r.height / 2 - tr.ty) * k;
-            setZoomPct(pct);
-            setViewerZoom(pct);
-            requestDraw();
-          }}
-          aria-label={t("zoomLevel", { pct: zoomPct })}
-          aria-valuetext={t("zoomLevel", { pct: zoomPct })}
-        />
-        <button type="button" className="ez-btn ez-btn--sm" onClick={() => applyFit("fit")} title={t("fitWindowHint")}>
-          {t("fitWindow")}
-        </button>
-        <button type="button" className="ez-btn ez-btn--sm" onClick={() => applyFit("width")}>
-          {t("fitWidth")}
-        </button>
-        <button type="button" className="ez-btn ez-btn--sm" onClick={goOneToOne} title={t("oneToOneHint")}>
-          {t("oneToOne")}
+        <button
+          type="button"
+          className="ez-icon-btn"
+          onClick={openLightbox}
+          aria-label={t("openLightbox")}
+          title={t("openLightbox")}
+        >
+          <FullscreenIcon size={15} />
         </button>
         <span className="ez-spacer" />
         <button
@@ -622,9 +480,7 @@ export default function PhotoViewer({
               onPointerDown={onOverlayPointerDown}
               onPointerMove={onOverlayPointerMove}
               onPointerUp={onOverlayPointerUp}
-              onWheel={onWheel}
             />
-            <canvas ref={navRef} className="ez-navigator" style={{ display: "none", width: 132 }} />
           </>
         )}
       </div>
@@ -731,6 +587,16 @@ export default function PhotoViewer({
             setConfirmRevert(false);
             await doRevert();
           }}
+        />
+      ) : null}
+      {lbIndex !== null ? (
+        <PhotoLightbox
+          projectId={projectId}
+          photos={photos}
+          index={lbIndex}
+          itemTitle={itemTitle}
+          onIndexChange={setLbIndex}
+          onClose={closeLightbox}
         />
       ) : null}
     </div>

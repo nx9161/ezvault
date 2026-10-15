@@ -150,3 +150,68 @@ entry `takeTour`, `shortcuts.takeTour`, palette-only — no key binding, hint
 shows ⌘K per the overlay convention). Deliberate choice: **no auto-start**
 — the tour runs only from explicit entry points; `ezvault:tour:v1` is set
 in localStorage when a run completes.
+
+---
+
+## 4. yet-another-react-lightbox@3.32.2 — viewer swap (Wave 2, FIRST)
+
+**Status:** ACCEPTED · landed 2026-10-15 · commit `<fill>`
+
+**What it is:** modern React lightbox component by Igor Danchenko
+(igordanchenko/yet-another-react-lightbox).
+
+**Verification (re-pulled 2026-10-15):**
+
+- **Stars:** 1,325 (github.com/igordanchenko/yet-another-react-lightbox,
+  repo pushed 2026-07-30) — via web search re-pull
+- **Version:** 3.32.2 = npm `latest` (npm registry, 2026-10-15)
+- **License (exact, read from `node_modules/yet-another-react-lightbox/LICENSE`):**
+  `MIT License — Copyright (c) 2022 Igor Danchenko`
+- **License gate:** `node scripts/check-licences.mjs` PASS — no GPL/AGPL/SSPL;
+  only the four pre-existing LGPL warnings (sharp/libheif, unchanged from baseline)
+- **OSV.dev:** `api.osv.dev/v1/query` for
+  `yet-another-react-lightbox@3.32.2` → **zero** vulnerabilities (`{}`)
+- **postinstall scripts:** none (`package.json` `scripts` is `null`)
+- **Telemetry/phone-home:** none — zero `fetch(`/`XMLHttpRequest`/`sendBeacon`/
+  analytics hits in `dist/`; zero runtime dependencies
+- **Install:** `npm install --save-exact yet-another-react-lightbox@3.32.2`
+
+**Bundle delta (measured):** `/[projectId]/page` First Load JS
+**208.26 → 207.63 KB gzip (−0.63 KB)** — the deleted hand-rolled zoom code
+outweighed the tiny `next/dynamic` wrapper. The lightbox (core + the six
+plugins + the next/image slide render) ships in its own lazy chunk
+(`1t4mhpt9x80ah.js`, **24.3 KB gzip** — under the architecture's 31.9 KB
+estimate) plus its CSS (`05lfx66_vp4vj.css`, 1.4 KB gzip); both load only
+when the viewer opens. Far under the 40 KB/route rule. No ADR needed.
+
+**Gap closed:** the hand-rolled zoom/gesture code in
+`components/inspector/PhotoViewer.tsx` (wheel-zoom, pinch-less `zoomAt`/`panBy`,
+1:1 original-bitmap loading, navigator minimap, zoom range slider, arrow-key
+pan) is **deleted**. Viewing is now `components/viewer/PhotoLightbox.tsx`
+(`"use client"`): the **six PRD-mandated plugins ONLY** — Zoom
+(pinch/keyboard/wheel), Thumbnails (item-photo strip), Fullscreen, Captions
+(EXIF via the stored `exifr` payload + item title), Download (single photo),
+Counter — no other plugins. Slides render via `next/image` `unoptimized`
+(presigned R2 URLs cannot go through the Next optimizer) with `objectFit:
+"contain"`. The edit surface (rotation/mirror/color edits, selection
+drawing, revert) stays in PhotoViewer — the lightbox is viewing-only;
+closing it on another slide syncs the active photo.
+
+**Placement note:** architecture §2.4 says "inside CenterPanel.tsx's viewer
+path" — the live tree has no viewer path in CenterPanel; the viewer is the
+Inspector's viewer tab, so the lightbox mounts there (opened from the viewer
+toolbar's new fullscreen button). The six-plugin constraint, the
+`next/dynamic(ssr:false)` boundary, and the lazy-chunk budget are unchanged.
+
+**Shortcuts/i18n cleanup:** the viewer registry entries for the deleted
+gestures (`fitWindow` 0, `actualPixels` 1, `pan` arrows) are removed from
+`lib/shortcuts/registry.ts` (the `?` overlay renders from the registry, so it
+stays consistent); `viewerZoomPct` is removed from the ui store (nothing read
+it). Zoom-era i18n keys (`viewer.zoomIn/zoomOut/zoomLevel/fitWindow/fitWidth/
+oneToOne/panHint`, `shortcuts.actualPixels/fitWindow/pan`) are deleted;
+`viewer.openLightbox` added; `tour.viewerBody` rewritten.
+
+**QA regression:** pinch/keyboard zoom now live in the lightbox (Zoom
+plugin: `maxZoomPixelRatio: 4`, `keyboardMoveDistance: 48`); selection
+drawing + edit sliders re-verified untouched on the edit surface (`tsc`
+clean, `npm test` green, `next build` green).

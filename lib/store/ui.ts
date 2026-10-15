@@ -34,11 +34,9 @@ interface UiState {
   view: ViewMode;
   density: Density;
   sort: SortKey;
-  viewerZoomPct: number;
   setView: (v: ViewMode) => void;
   setDensity: (d: Density) => void;
   setSort: (s: SortKey) => void;
-  setViewerZoom: (n: number) => void;
 
   // --- navigation / filters ---
   libraryFilter: LibraryFilter;
@@ -132,11 +130,9 @@ export const useUiStore = create<UiState>()(
         view: "grid",
         density: "comfortable",
         sort: "dateAdded",
-        viewerZoomPct: 100,
         setView: (view) => set({ view }),
         setDensity: (density) => set({ density }),
         setSort: (sort) => set({ sort }),
-        setViewerZoom: (viewerZoomPct) => set({ viewerZoomPct }),
 
         libraryFilter: "all",
         activeListId: null,
