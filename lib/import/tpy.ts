@@ -31,7 +31,7 @@ import 'server-only';
 
 import { randomUUID, createHash } from 'node:crypto';
 import { getStorageDriver, keys, extForMimetype } from '../storage/driver';
-import { sql, tx, bumpRevQuery, bumpCountersQuery, type TxQuery } from '../db/index';
+import { sql, tx, queryRaw, bumpRevQuery, bumpCountersQuery, type TxQuery } from '../db/index';
 import { sanitizeTiptapDoc } from '../notes/sanitize';
 import { tiptapToText } from '../export/jsonld.js';
 import { processPhoto } from './process-photo';
@@ -452,11 +452,31 @@ interface ListsSidecar {
   list_items: { list_tpy_id: number; item_tpy_id: number; position: number }[];
 }
 
-async function readJsonlSubjects(jsonlKey: string): Promise<NormalizedSubject[]> {
+/** Normalized-subject cache for readJsonlSubjects (A3): jobId → parsed lines. */
+const jsonlCache = new Map<string, { size: number; mtime: string | null; subjects: NormalizedSubject[] }>();
+
+async function readJsonlSubjects(jobId: string): Promise<NormalizedSubject[]> {
   const storage = await getStorageDriver();
+  const jsonlKey = keys.tpyStaging(jobId, 'import.jsonl');
+  // A3: the jsonl is written once by analyze, but the wizard resumes via
+  // repeated /run calls — a warm instance reuses the parsed subjects instead
+  // of re-fetching + re-parsing a potentially hundreds-of-MB file per resume
+  // call. Validated by the staging object's size+mtime, so a re-analyze
+  // invalidates. Bounded to 4 jobs.
+  const head = await storage.head(jsonlKey).catch(() => null);
+  const cached = jsonlCache.get(jobId);
+  if (cached && head && cached.size === head.size && cached.mtime === (head.lastModified ?? null)) {
+    return cached.subjects;
+  }
   const buf = await storage.getBytes(jsonlKey);
   const lines = buf.toString('utf8').split('\n').filter((l) => l.trim());
-  return lines.slice(1).map((l) => JSON.parse(l) as NormalizedSubject);
+  const subjects = lines.slice(1).map((l) => JSON.parse(l) as NormalizedSubject);
+  jsonlCache.set(jobId, { size: buf.length, mtime: head?.lastModified ?? null, subjects });
+  if (jsonlCache.size > 4) {
+    const oldest = jsonlCache.keys().next().value;
+    if (oldest !== undefined) jsonlCache.delete(oldest);
+  }
+  return subjects;
 }
 
 async function readListsSidecar(jobId: string): Promise<ListsSidecar> {
@@ -491,7 +511,7 @@ export async function runTpyImport(
 ): Promise<TpyRunResult> {
   await checkCpuGuard();
   const storage = await getStorageDriver();
-  const subjects = await readJsonlSubjects(keys.tpyStaging(jobId, 'import.jsonl'));
+  const subjects = await readJsonlSubjects(jobId);
 
   // Idempotency: already-mapped tpy ids are skipped (resume-from-checkpoint).
   const mappedRows = await sql()`SELECT tpy_subject_id, new_subject_id FROM tpy_import_map WHERE job_id = ${jobId}`;
@@ -509,15 +529,28 @@ export async function runTpyImport(
 
   // Template resolution cache: uri -> template UUID (or null).
   const tplCache = new Map<string, string | null>();
-  async function resolveTemplate(uri: string, observedProps: string[]): Promise<string | null> {
-    if (tplCache.has(uri)) return tplCache.get(uri)!;
-    const existing = await sql()`SELECT id FROM templates WHERE project_id = ${projectId} AND uri = ${uri} LIMIT 1`;
-    if (existing.length) {
-      tplCache.set(uri, existing[0].id as string);
-      return existing[0].id as string;
-    }
-    const action = opts.templateMap?.[uri] ?? 'use_existing';
-    if (action === 'create_new') {
+  /**
+   * A3: batch-resolve every template URI used by the chunk — ONE SELECT for
+   * lookups instead of one per subject. create_new inserts stay per-URI
+   * (rare; fields come from the first chunk subject using the URI, same as
+   * the old per-subject cache-fill order).
+   */
+  async function resolveTemplatesForChunk(chunk: NormalizedSubject[]): Promise<void> {
+    const uris = [...new Set(chunk.map((s) => s.template_uri).filter((u) => u && !tplCache.has(u)))];
+    if (!uris.length) return;
+    const rows = await sql()`SELECT uri, id FROM templates WHERE project_id = ${projectId} AND uri = ANY(${uris})`;
+    const found = new Map<string, string>(rows.map((r) => [r['uri'] as string, r['id'] as string]));
+    for (const uri of uris) {
+      if (found.has(uri)) {
+        tplCache.set(uri, found.get(uri)!);
+        continue;
+      }
+      if (opts.templateMap?.[uri] !== 'create_new') {
+        tplCache.set(uri, null);
+        continue;
+      }
+      const s0 = chunk.find((s) => s.template_uri === uri)!;
+      const observedProps = [...new Set(s0.metadata.map((m) => m.property))];
       const name = uri.split('/').pop()?.split('#').pop() || uri;
       const fields = observedProps.map((p, i) => ({
         property_uri: p,
@@ -526,25 +559,45 @@ export async function runTpyImport(
       }));
       const created = await sql()`INSERT INTO templates (project_id, name, uri, fields)
         VALUES (${projectId}, ${name}, ${uri}, ${JSON.stringify(fields)}::jsonb) RETURNING id`;
-      tplCache.set(uri, created[0].id as string);
-      return created[0].id as string;
+      tplCache.set(uri, created[0]['id'] as string);
     }
-    tplCache.set(uri, null);
-    return null;
   }
 
   // Tag cache: lower(name) -> id (CITEXT dedupe).
   const tagCache = new Map<string, string>();
-  async function resolveTag(name: string, color: string | null): Promise<string> {
-    const key = name.trim().toLowerCase();
-    if (tagCache.has(key)) return tagCache.get(key)!;
-    await sql()`INSERT INTO tags (id, project_id, name, color)
-      VALUES (${randomUUID()}, ${projectId}, ${name.trim()}, ${color ?? '#B3541E'})
-      ON CONFLICT (project_id, name) DO NOTHING`;
-    const row = await sql()`SELECT id FROM tags WHERE project_id = ${projectId} AND name = ${name.trim()} LIMIT 1`;
-    const tagId = row[0].id as string;
-    tagCache.set(key, tagId);
-    return tagId;
+  /**
+   * A3: batch-resolve every tag used by the chunk — ONE bulk upsert + id
+   * lookup instead of two round trips per tag. ON CONFLICT keeps the
+   * existing color (first wins), matching the old per-tag behavior.
+   */
+  async function resolveTagsForChunk(chunk: NormalizedSubject[]): Promise<void> {
+    const inputs = new Map<string, { name: string; color: string }>();
+    for (const s of chunk) {
+      for (const t of s.tags) {
+        if (!t.name.trim()) continue;
+        const key = t.name.trim().toLowerCase();
+        if (!tagCache.has(key) && !inputs.has(key)) {
+          inputs.set(key, { name: t.name.trim(), color: t.color ?? '#B3541E' });
+        }
+      }
+    }
+    if (!inputs.size) return;
+    const names = [...inputs.values()].map((t) => t.name);
+    const colors = [...inputs.values()].map((t) => t.color);
+    const rows = await queryRaw<{ id: string; name: string }>(
+      `WITH input(name, color) AS (
+         SELECT * FROM UNNEST($2::text[], $3::text[])
+       ),
+       ins AS (
+         INSERT INTO tags (id, project_id, name, color)
+         SELECT gen_random_uuid(), $1, i.name, i.color FROM input i
+         ON CONFLICT (project_id, name) DO NOTHING
+       )
+       SELECT t.id, t.name::text AS name FROM tags t
+       JOIN input i ON i.name = t.name AND t.project_id = $1`,
+      [projectId, names, colors],
+    );
+    for (const r of rows) tagCache.set(r.name.toLowerCase(), r.id);
   }
 
   const conflicts: TpyConflict[] = [];
@@ -601,11 +654,15 @@ export async function runTpyImport(
     const q = (text: string, params?: unknown[]): TxQuery => ({ text, params });
     const photoWork: { subject: NormalizedSubject; newId: string }[] = [];
 
+    // A3: resolve the chunk's templates + tags up front (batched) so the
+    // per-subject loop below does zero round trips.
+    await resolveTemplatesForChunk(chunk);
+    await resolveTagsForChunk(chunk);
+
     for (const s of chunk) {
       const newId = randomUUID();
       newIds.set(s.tpy_id, newId);
-      const observedProps = s.metadata.map((m) => m.property);
-      const templateId = await resolveTemplate(s.template_uri, observedProps);
+      const templateId = s.template_uri ? (tplCache.get(s.template_uri) ?? null) : null;
       const rawJson = s.raw && Object.keys(s.raw).length ? JSON.stringify(s.raw) : null;
 
       queries.push(q(
@@ -716,10 +773,11 @@ export async function runTpyImport(
         }
       }
 
-      // Tags (CITEXT dedupe).
+      // Tags (CITEXT dedupe) — ids pre-resolved for the chunk (A3).
       for (const t of s.tags) {
         if (!t.name.trim()) continue;
-        const tagId = await resolveTag(t.name, t.color);
+        const tagId = tagCache.get(t.name.trim().toLowerCase());
+        if (!tagId) continue; // cannot happen: resolveTagsForChunk covered the chunk
         queries.push(q(
           `INSERT INTO taggings (tag_id, subject_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
           [tagId, newId],
@@ -758,6 +816,7 @@ export async function runTpyImport(
   const done = pending.length <= limit;
   if (done) {
     await sql()`UPDATE import_jobs SET status = 'done', updated_at = now() WHERE id = ${jobId}`;
+    jsonlCache.delete(jobId); // free the cached normalized subjects (A3)
   }
   return { processed: batch.length, imported, conflicts, done };
 }
@@ -782,7 +841,11 @@ async function importTpyLists(
   for (const r of mappedLists) {
     listIdMap.set(Number((r['tpy_subject_id'] as string).slice(5)), r['new_subject_id'] as string);
   }
-  // Parents before children (iterative depth resolution).
+  // A3: batch the list tree into ONE transaction (was one implicit txn per
+  // list). Parents resolve before children in memory; unresolvable rows
+  // (e.g. cycles — the DB trigger would reject them) are skipped with a
+  // conflict entry, matching the old behavior.
+  const toInsert: { tpy_id: number; id: string; name: string; parentId: string | null; position: number }[] = [];
   const remaining = [...sidecar.lists];
   let guard = remaining.length + 1;
   while (remaining.length && guard-- > 0) {
@@ -794,17 +857,34 @@ async function importTpyLists(
     }
     const id = randomUUID();
     const parentId = li.parent_tpy_id != null ? listIdMap.get(li.parent_tpy_id)! : null;
+    listIdMap.set(li.tpy_id, id);
+    toInsert.push({ tpy_id: li.tpy_id, id, name: li.name, parentId, position: li.position });
+  }
+  for (const li of remaining) {
+    conflicts.push({ tpy_id: li.tpy_id, kind: 'list', reason: 'unresolved_parent', detail: `parent tpy id ${li.parent_tpy_id}` });
+  }
+  if (toInsert.length) {
     try {
-      await sql()`INSERT INTO lists (id, project_id, name, parent_list_id, position)
-        VALUES (${id}, ${projectId}, ${li.name}, ${parentId}, ${li.position})`;
-      await sql()`INSERT INTO tpy_import_map (job_id, tpy_subject_id, new_subject_id)
-        VALUES (${jobId}, ${'list:' + li.tpy_id}, ${id}) ON CONFLICT DO NOTHING`;
-      listIdMap.set(li.tpy_id, id);
-      imported.lists++;
+      await tx((q) => {
+        const queries: TxQuery[] = [];
+        for (const l of toInsert) {
+          queries.push(q(`INSERT INTO lists (id, project_id, name, parent_list_id, position)
+            VALUES ($1,$2,$3,$4,$5)`, [l.id, projectId, l.name, l.parentId, l.position]));
+          queries.push(q(`INSERT INTO tpy_import_map (job_id, tpy_subject_id, new_subject_id)
+            VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [jobId, 'list:' + l.tpy_id, l.id]));
+        }
+        queries.push(bumpRevQuery(projectId));
+        return queries;
+      });
+      for (const l of toInsert) imported.lists++;
     } catch (err) {
-      conflicts.push({ tpy_id: li.tpy_id, kind: 'list', reason: 'list_failed', detail: String(err).slice(0, 200) });
+      conflicts.push({ tpy_id: -1, kind: 'list', reason: 'list_batch_failed', detail: String(err).slice(0, 200) });
+      for (const l of toInsert) listIdMap.delete(l.tpy_id);
+      return;
     }
   }
+  // list_items: one batched INSERT via UNNEST.
+  const liList: string[] = []; const liItem: string[] = []; const liPos: number[] = [];
   for (const li of sidecar.list_items) {
     const listId = listIdMap.get(li.list_tpy_id);
     const itemId = itemNewIds.get(li.item_tpy_id) ?? newIds.get(li.item_tpy_id);
@@ -812,10 +892,17 @@ async function importTpyLists(
       conflicts.push({ tpy_id: li.list_tpy_id, kind: 'list_item', reason: 'unresolved', detail: `list ${li.list_tpy_id} / item ${li.item_tpy_id}` });
       continue;
     }
-    await sql()`INSERT INTO list_items (list_id, item_id, position)
-      VALUES (${listId}, ${itemId}, ${li.position}) ON CONFLICT DO NOTHING`;
+    liList.push(listId); liItem.push(itemId); liPos.push(li.position);
   }
-  await tx((q) => [bumpRevQuery(projectId)]);
+  if (liList.length) {
+    await queryRaw(
+      `INSERT INTO list_items (list_id, item_id, position)
+       SELECT * FROM UNNEST($1::uuid[], $2::uuid[], $3::int[])
+       ON CONFLICT DO NOTHING`,
+      [liList, liItem, liPos],
+    );
+    await tx((q) => [bumpRevQuery(projectId)]);
+  }
 }
 
 /** Asset handling for one imported photo (Standard vs Advanced, B8). */
