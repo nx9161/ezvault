@@ -19,7 +19,7 @@ import Inspector from "@/components/inspector/Inspector";
 import StatusBar from "@/components/statusbar/StatusBar";
 import CrossTabBanner from "@/components/crosstab/CrossTabBanner";
 import ShortcutsOverlay from "@/components/shortcuts/ShortcutsOverlay";
-import { useGlobalShortcuts } from "@/components/shortcuts/useGlobalShortcuts";
+import { RegisteredHotkeys } from "@/components/shortcuts/useRegisteredHotkeys";
 import { Toasts } from "@/components/ui/Toasts";
 import { Menu, MenuItem, MenuSeparator } from "@/components/ui/Menu";
 import ImportDialog from "@/components/importer/ImportDialog";
@@ -247,7 +247,8 @@ function GlobalDropZone() {
 
 export default function WorkspaceClient({ projectId }: { projectId: string }) {
   const ctx = useOpContext(projectId);
-  useGlobalShortcuts(projectId, ctx);
+  // D-INTc: global bindings live in lib/shortcuts/registry.ts, bound by
+  // <RegisteredHotkeys/> rendered below (replaces useGlobalShortcuts).
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
   const setSidebarWidth = useUiStore((s) => s.setSidebarWidth);
   const inspectorWidth = useUiStore((s) => s.inspectorWidth);
@@ -256,6 +257,7 @@ export default function WorkspaceClient({ projectId }: { projectId: string }) {
 
   return (
     <div className="ez-app">
+      <RegisteredHotkeys projectId={projectId} ctx={ctx} />
       <TopBar projectId={projectId} />
       <CrossTabBanner projectId={projectId} />
       <MeterBanners projectId={projectId} />
