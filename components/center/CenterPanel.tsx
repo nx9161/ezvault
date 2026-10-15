@@ -812,9 +812,9 @@ export default function CenterPanel({ projectId }: { projectId: string }) {
   const ctx = useOpContext(projectId);
 
   // F-A: drag-reorder within a list. The server persists absolute positions
-  // (list_items.position); the items endpoint does not yet return them, so
-  // the reordered view is held client-side for the session. Once the backend
-  // exposes item.position, the position-aware sort below takes over.
+  // (list_items.position) and the items endpoint exposes them, so the
+  // position-aware sort below is the source of truth; manualOrder only
+  // bridges the optimistic moment between drop and refetch.
   const [manualOrder, setManualOrder] = useState<string[] | null>(null);
   useEffect(() => {
     setManualOrder(null);

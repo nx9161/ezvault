@@ -24,7 +24,14 @@ ALTER TABLE search_documents
   ADD COLUMN IF NOT EXISTS doc_tags  TSVECTOR NOT NULL DEFAULT ''::tsvector,
   ADD COLUMN IF NOT EXISTS doctext   TEXT     NOT NULL DEFAULT '';
 
--- 2. Trigger function: populate the per-scope columns + doctext.
+-- 2. Drop the old combined column FIRST (its GIN index goes with it), so the
+-- backfill below never touches it. The only readers were the search route
+-- and the items-grid q filter — both rewritten to the scoped columns.
+-- (Moved before the backfill: on a populated DB the old `doc` is NOT NULL
+-- with no default, so backfilling before the drop would fail.)
+ALTER TABLE search_documents DROP COLUMN IF EXISTS doc;
+
+-- 3. Trigger function: populate the per-scope columns + doctext.
 CREATE OR REPLACE FUNCTION refresh_search_document(p_subject UUID) RETURNS void AS $$
 DECLARE v_meta TEXT; v_notes TEXT; v_tags TEXT;
 BEGIN
@@ -60,17 +67,13 @@ BEGIN
     updated_at = now();
 END $$ LANGUAGE plpgsql;
 
--- 3. Backfill every subject (rows for content-less subjects carry empty vectors).
+-- 4. Backfill every subject (rows for content-less subjects carry empty vectors).
+-- Safe: `doc` is already dropped above, so the INSERT's column list is complete.
 SELECT refresh_search_document(s.id) FROM subjects s;
 
--- 4. Indexes: one GIN per scope column + an expression GIN for the
+-- 5. Indexes: one GIN per scope column + an expression GIN for the
 -- scope=all concatenation the route queries.
 CREATE INDEX IF NOT EXISTS search_documents_gin_meta  ON search_documents USING GIN (doc_meta);
 CREATE INDEX IF NOT EXISTS search_documents_gin_notes ON search_documents USING GIN (doc_notes);
 CREATE INDEX IF NOT EXISTS search_documents_gin_tags  ON search_documents USING GIN (doc_tags);
 CREATE INDEX IF NOT EXISTS search_documents_gin_all   ON search_documents USING GIN ((doc_meta || doc_notes || doc_tags));
-
--- 5. Drop the old combined column (its GIN index goes with it). The only
--- readers were the search route and the items-grid q filter — both rewritten
--- to the scoped columns in this same change.
-ALTER TABLE search_documents DROP COLUMN IF EXISTS doc;
