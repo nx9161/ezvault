@@ -116,3 +116,80 @@ Structural spot-check on the Turbopack production build (the webpack-era `/tmp/m
 ---
 
 **Next:** builders address B1 + B2 (+ optional: refresh the stale F-A comment at `components/center/CenterPanel.tsx:814-816`), push to `main`, request QA Round 2. No sign-off until both are closed and re-verified.
+
+---
+
+# QA Round 2 — re-verification (2026-10-15)
+
+Baseline: `origin/main` @ `e07cbab` (fix commits `574ebef`, `e07cbab`).
+
+## B1 — CLOSED
+
+- Every statement in `0006` (8 statements) and `0007` (3 statements) now
+  carries idempotent guards: `ADD COLUMN IF NOT EXISTS` ×4, `CREATE OR
+  REPLACE FUNCTION`, upsert backfill (`ON CONFLICT (subject_id) DO UPDATE`),
+  `CREATE INDEX IF NOT EXISTS` ×4, `DROP COLUMN IF EXISTS` (0006);
+  `ADD COLUMN IF NOT EXISTS`, idempotent `UPDATE` backfill,
+  `CREATE UNIQUE INDEX IF NOT EXISTS` (0007).
+- **Honesty spot-check on the fix agent's PGlite "12/12" claim:** no
+  verification artifact exists anywhere in the repo — no script, doc, or
+  commit message documents a 12/12 run — so the claim is **not auditable
+  from the tree**. QA substituted its own PGlite (Postgres 17 WASM)
+  harness (`/tmp/pgcheck/verify.mjs`; harness-only shims for the
+  PGlite-missing `pgcrypto`/`citext` extensions, which touch nothing in
+  0006/0007). Two scenarios:
+  - **FRESH-DEPLOY (empty DB — the runbook's actual deploy path): 16/16
+    PASS.** Full apply clean; full re-run clean with byte-identical end
+    state (columns, index defs, function body, row data); re-run after a
+    partial apply at **every** statement boundary (7 for 0006, 2 for 0007)
+    converges to the identical end state with zero errors.
+  - **POPULATED-DB (subjects + content via the old trigger path):** 0007
+    5/5 PASS; **0006 full apply FAILS on first apply** — the backfill
+    `SELECT refresh_search_document(s.id)` INSERTs rows for subjects that
+    have no `search_documents` row, and the INSERT column list omits the
+    still-present `NOT NULL doc` column (dropped only in step 5) →
+    `null value in column "doc" violates not-null constraint`. This is NOT
+    a B1 idempotency failure (it fails identically on first apply) and it
+    **cannot occur on the documented fresh-Neon deploy path** (zero
+    subjects at migration time — verified 16/16 above). Recorded as a
+    **non-blocking robustness observation**: if 0006 is ever applied to a
+    populated DB, the backfill INSERT needs `doc` in its column list
+    (one-line follow-up; not a deploy blocker).
+- `DEPLOY-RUNBOOK.md:31-33`'s claim ("Re-running is safe") is now **TRUE**
+  on the deploy path.
+
+## B2 — CLOSED
+
+- `DEPLOY-RUNBOOK.md` §8 "Post-deploy verifications (Wave 2 W2-E —
+  owner-blocked)" exists and lists **all 8 H-series items** — H1, H2, H4,
+  H5, H8, H9, H6, H7 — each with a "Prerequisite tap" column (R2 buckets /
+  Vercel project / Neon project), plus the A1/H3 live FTS re-verify
+  carry-over. The section header marks every item **OWNER-BLOCKED** until
+  its taps land, with explicit "nothing here is silently dropped" and a
+  flip-to-`DONE (date)` instruction. ✓
+
+## Re-run gates (final tree, `origin/main` @ `e07cbab`)
+
+- `npm run build` — **green** (exit 0).
+- `npx tsc --noEmit` — **clean** (exit 0, zero errors).
+- `npm test` — **58/58 pass**, 12 suites, 0 fail / 0 skip.
+
+## No-regression checks
+
+- `INTEGRATION-DECISIONS.md` — still complete: 3 entries
+  (react-hotkeys-hook, cmdk+fuse.js, driver.js), each with license-gate
+  PASS notes.
+- `node scripts/check-licences.mjs` — exit 0, "OK (no GPL/AGPL/SSPL
+  vendored)"; only the same four pre-existing LGPL warnings
+  (sharp/libheif) as baseline.
+
+## Verdict: **SIGN-OFF — BLOCK lifted.**
+
+Caveats carried (non-blocking): (1) the fix agent's 12/12 PGlite claim is
+unauditable from the repo — QA verified B1 with its own harness instead;
+(2) 0006's backfill assumes the fresh-DB deploy path (documented); a
+populated-DB first-apply would need `doc` in the backfill INSERT list —
+one-line follow-up; (3) the stale F-A comment at
+`components/center/CenterPanel.tsx:814-816` from Round 1 is still open
+(optional); (4) the W1-B real-browser screenshot pass remains carried to
+the parent (unchanged — subagents have no live browser).
