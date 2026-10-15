@@ -20,8 +20,11 @@ interface MenuProps {
 
 export function Menu({ anchor, onClose, children, label }: MenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  // D-M12: capture the trigger so focus returns on close (Dialog pattern).
+  const triggerRef = useRef<Element | null>(null);
 
   useEffect(() => {
+    triggerRef.current = document.activeElement;
     const el = ref.current;
     if (!el) return;
     // Keep inside the viewport.
@@ -59,6 +62,8 @@ export function Menu({ anchor, onClose, children, label }: MenuProps) {
     return () => {
       document.removeEventListener("keydown", onKey, true);
       document.removeEventListener("pointerdown", onDown);
+      const trigger = triggerRef.current as HTMLElement | null;
+      if (trigger && typeof trigger.focus === "function") trigger.focus();
     };
   }, [anchor, onClose]);
 
