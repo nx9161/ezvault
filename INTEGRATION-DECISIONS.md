@@ -155,7 +155,7 @@ in localStorage when a run completes.
 
 ## 4. yet-another-react-lightbox@3.32.2 — viewer swap (Wave 2, FIRST)
 
-**Status:** ACCEPTED · landed 2026-10-15 · commit `<fill>`
+**Status:** ACCEPTED · landed 2026-10-15 · commit `65bd79c`
 
 **What it is:** modern React lightbox component by Igor Danchenko
 (igordanchenko/yet-another-react-lightbox).
