@@ -58,7 +58,7 @@ preserved (single keys inert in inputs/contenteditable/TipTap).
 
 ## 2. cmdk@1.1.1 + fuse.js@7.5.0 — command palette (Wave 1, SECOND)
 
-**Status:** ACCEPTED · landed 2026-10-15 · commit `TBD`
+**Status:** ACCEPTED · landed 2026-10-15 · commit `d26c43e`
 
 **What they are:** `cmdk` — unstyled React command-menu primitive (Paco
 Coursey lineage; repo moved to dip/cmdk). `fuse.js` — client-side fuzzy
