@@ -250,7 +250,7 @@ export default function StorageDialog({ projectId }: { projectId: string }) {
           ))}
 
           {mode === "flagged-only" ? (
-            <div style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 8, marginTop: 4 }}>
+            <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 8, marginTop: 4 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                 <strong style={{ fontSize: 13 }}>
                   {t("flaggedPickTitle")} ({selected.size})
