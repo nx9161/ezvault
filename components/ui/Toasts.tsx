@@ -13,9 +13,11 @@ export function Toasts() {
   const toasts = useUiStore((s) => s.toasts);
   const dismissToast = useUiStore((s) => s.dismissToast);
 
+  // F-E: errors persist until dismissed (✕); only info toasts auto-dismiss.
   useEffect(() => {
-    if (toasts.length === 0) return;
-    const timers = toasts.map((toast) =>
+    const auto = toasts.filter((toast) => toast.kind !== "error");
+    if (auto.length === 0) return;
+    const timers = auto.map((toast) =>
       setTimeout(() => dismissToast(toast.id), 6000),
     );
     return () => timers.forEach(clearTimeout);
