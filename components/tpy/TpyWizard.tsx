@@ -92,8 +92,8 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
       // 1. Presign staging PUTs (canonical TpyPresign shape).
       const presigned = await post<{
         job_id: string;
-        tpy_grant: { url: string };
-        assets_grant?: { url: string };
+        tpy_grant: { url: string; key: string };
+        assets_grant?: { url: string; key: string };
       }>("/api/import/tpy/presign", {
         project_id: projectId,
         with_assets: !!assetsFile,
@@ -108,7 +108,13 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
           () => {},
         );
       }
-      // 2. Analyze (server-side single pass over the staged .tpy).
+      // 2. Register the staged files, then analyze (server-side single pass).
+      await post("/api/import/tpy/upload-complete", {
+        job_id: presigned.job_id,
+        project_id: projectId,
+        staged_key: presigned.tpy_grant.key,
+        assets_zip_key: presigned.assets_grant?.key,
+      });
       const analysis = await post<AnalyzeReport>("/api/import/tpy/analyze", {
         job_id: presigned.job_id,
       });
@@ -445,7 +451,7 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
                 type="button"
                 className="ez-btn"
                 onClick={() => {
-                  window.location.href = `/api/import/tpy/report/${runJobId}?format=csv`;
+                  window.location.href = `/api/import/tpy/report/${runJobId}`;
                 }}
               >
                 {t("downloadReport")}
