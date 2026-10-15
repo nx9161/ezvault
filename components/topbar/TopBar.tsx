@@ -12,38 +12,7 @@ import { useMeter, useProject } from "@/lib/api/hooks";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "@/components/ui/Menu";
 import { GridIcon, TableIcon, ThemeIcon, ChevronDownIcon } from "@/components/ui/icons";
 
-/** Original archival-lamp glyph (drawn for EZVault — no borrowed artwork). */
-export function LampGlyph({ size = 22 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path
-        d="M9 3h6l1.5 5h-9L9 3Z"
-        fill="var(--accent)"
-        opacity="0.9"
-      />
-      <path
-        d="M7.5 8h9c.8 0 1.3.9.9 1.6L12 18l-5.4-8.4c-.4-.7.1-1.6.9-1.6Z"
-        stroke="var(--accent)"
-        strokeWidth="1.8"
-        fill="var(--accent-soft)"
-      />
-      <circle cx="12" cy="12.4" r="1.7" fill="var(--accent)" />
-      <path
-        d="M10 21h4"
-        stroke="var(--ink-2)"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
+import { VaultMark } from "@/components/ui/icons";
 
 function formatBytes(n: number): string {
   if (n >= 1 << 30) return `${(n / (1 << 30)).toFixed(2)} GB`;
@@ -133,8 +102,8 @@ export default function TopBar({ projectId }: { projectId: string }) {
 
   return (
     <header className="ez-topbar">
-      <div className="ez-brand" aria-hidden="true">
-        <LampGlyph />
+      <div className="ez-brand">
+        <VaultMark />
         <span>EZVault</span>
       </div>
       <SearchBox />

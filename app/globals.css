@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT */
-/* EZVault design tokens — "Lantern" identity (original). Light = "Reading Room", dark = "Darkroom". */
+/* EZVault design tokens — EZVault identity. Light = "Reading Room", dark = "Darkroom". */
 
 :root {
   color-scheme: light;
@@ -179,7 +179,7 @@ input[type="range"].ez-range { accent-color: var(--accent); width: 100%; }
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
 }
-.ez-brand { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 700; letter-spacing: .2px; }
+.ez-brand { display: flex; align-items: center; gap: 8px; font-family: var(--font-notes); font-size: 17px; font-weight: 700; letter-spacing: .2px; }
 .ez-brand svg { display: block; }
 .ez-search-wrap { flex: 1; max-width: 560px; position: relative; }
 .ez-search-wrap .ez-input { width: 100%; padding-right: 64px; }
