@@ -326,12 +326,18 @@ export function setMetadataOp(
   before: MetadataValuesMap,
   after: MetadataValuesMap,
   label = "Edit metadata",
+  opts?: {
+    /** SHOULD-29: per-field languages for the after image. */
+    languages?: Record<string, string | null>;
+    /** Per-field languages for the before image (undo restores them). */
+    beforeLanguages?: Record<string, string | null>;
+  },
 ): Command {
   const url = `/api/projects/${ctx.projectId}/subjects/${subjectId}/metadata`;
   return makeCommand(label, "metadata", async (opId) => {
-    await patch(url, { values: metadataWire(after), replace: true }, { opId: opId });
+    await patch(url, { values: metadataWire(after, undefined, opts?.languages), replace: true }, { opId: opId });
   }, async (opId) => {
-    await patch(url, { values: metadataWire(before), replace: true }, { opId: opId });
+    await patch(url, { values: metadataWire(before, undefined, opts?.beforeLanguages), replace: true }, { opId: opId });
   });
 }
 

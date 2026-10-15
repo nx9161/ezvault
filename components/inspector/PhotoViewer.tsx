@@ -29,6 +29,8 @@ import {
   RotateCwIcon,
   SelectionDrawIcon,
   FullscreenIcon,
+  EyeIcon,
+  EyeOffIcon,
 } from "@/components/ui/icons";
 
 // Lazy chunk — zero first-load cost; loads on first open.
@@ -124,6 +126,8 @@ export default function PhotoViewer({
   const [loadError, setLoadError] = useState(false);
   /** W2-A: lightbox open — holds the controlled slide index. */
   const [lbIndex, setLbIndex] = useState<number | null>(null);
+  /** SHOULD-21: hide the selection overlay rects (the tab strip below stays). */
+  const [overlayHidden, setOverlayHidden] = useState(false);
 
   const [edits, setEdits] = useState<PhotoEdits>({ ...DEFAULT_EDITS, ...(photo.edits ?? {}) });
   const gestureBefore = useRef<PhotoEdits | null>(null);
@@ -137,6 +141,12 @@ export default function PhotoViewer({
   const drawQueued = useRef(false);
   const drawRect = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const photoIdRef = useRef(photo.id);
+
+  // Fresh-draw state: drawAll runs inside rAF from a stable callback, so it
+  // must read render-fresh values through this ref — never the (stale)
+  // first-render closure. This also carries the SHOULD-21 overlay toggle.
+  const drawState = useRef({ selections, activeSelectionId, edits, frameSize, overlayHidden });
+  drawState.current = { selections, activeSelectionId, edits, frameSize, overlayHidden };
 
   const rotated = edits.angle % 180 !== 0;
   const pw = rotated ? photo.height : photo.width;
@@ -205,6 +215,7 @@ export default function PhotoViewer({
 
   function photoToScreen(x: number, y: number): [number, number] {
     const tr = transform.current;
+    const { edits } = drawState.current;
     const rad = (edits.angle * Math.PI) / 180;
     const cos = Math.cos(rad);
     const sin = Math.sin(rad);
@@ -219,6 +230,7 @@ export default function PhotoViewer({
 
   function screenToPhoto(sx: number, sy: number): [number, number] {
     const tr = transform.current;
+    const { edits } = drawState.current;
     const rad = (-edits.angle * Math.PI) / 180;
     let rx = (sx - tr.tx) / tr.scale;
     let ry = (sy - tr.ty) / tr.scale;
@@ -233,6 +245,7 @@ export default function PhotoViewer({
   function drawAll() {
     // D-E6: selection rects read the theme accent (not hardcoded amber).
     const { solid, dim } = themeAccent();
+    const { selections, activeSelectionId, edits, frameSize, overlayHidden } = drawState.current;
     const base = baseRef.current;
     const overlay = overlayRef.current;
     const frame = frameRef.current;
@@ -268,8 +281,11 @@ export default function PhotoViewer({
     }
 
     // Overlay: selection rects + in-progress draw rect.
+    // SHOULD-21: the eye toggle hides the rects + labels; the in-progress
+    // draw rect always shows, and the tab strip below stays as the SR path.
     octx.setTransform(dpr, 0, 0, dpr, 0, 0);
     octx.clearRect(0, 0, cw, ch);
+    if (!overlayHidden) {
     for (const sel of selections) {
       const [x0, y0] = photoToScreen(sel.x, sel.y);
       const [x1, y1] = photoToScreen(sel.x + sel.w, sel.y + sel.h);
@@ -289,6 +305,7 @@ export default function PhotoViewer({
         octx.fillText(sel.name, rx + 4, ry - 6 > 8 ? ry - 6 : ry + 14);
       }
     }
+    } // !overlayHidden
     if (drawRect.current) {
       const { x0, y0, x1, y1 } = drawRect.current;
       const [sx0, sy0] = photoToScreen(x0, y0);
@@ -303,7 +320,7 @@ export default function PhotoViewer({
 
   useEffect(() => {
     requestDraw();
-  }, [requestDraw, selections, activeSelectionId, edits, frameSize]);
+  }, [requestDraw, selections, activeSelectionId, edits, frameSize, overlayHidden]);
 
   // --- edits: commit on gesture end (one undo command per gesture) ---
   async function commitEdits(next: PhotoEdits) {
@@ -433,6 +450,19 @@ export default function PhotoViewer({
           title={t("openLightbox")}
         >
           <FullscreenIcon size={15} />
+        </button>
+        <button
+          type="button"
+          className="ez-icon-btn"
+          aria-pressed={!overlayHidden}
+          onClick={() => {
+            setOverlayHidden((h) => !h);
+            requestDraw();
+          }}
+          aria-label={overlayHidden ? t("showOverlay") : t("hideOverlay")}
+          title={overlayHidden ? t("showOverlay") : t("hideOverlay")}
+        >
+          {overlayHidden ? <EyeOffIcon size={15} /> : <EyeIcon size={15} />}
         </button>
         <span className="ez-spacer" />
         <button

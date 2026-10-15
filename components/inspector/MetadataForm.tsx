@@ -5,9 +5,9 @@
 
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { useTemplates, useMetadata } from "@/lib/api/hooks";
+import { useTemplates, useMetadata, useMetadataRows } from "@/lib/api/hooks";
 import { patch, get } from "@/lib/api/client";
 import {
   runCommand,
@@ -27,6 +27,24 @@ function isRightsField(field: UiTemplateField): boolean {
   return field.property_uri.toLowerCase().includes("rights");
 }
 
+// SHOULD-29: curated ISO 639-1 language tags for the per-field selector.
+const LANG_OPTIONS: [code: string, name: string][] = [
+  ["en", "English"],
+  ["fr", "Français"],
+  ["de", "Deutsch"],
+  ["es", "Español"],
+  ["it", "Italiano"],
+  ["pt", "Português"],
+  ["nl", "Nederlands"],
+  ["ru", "Русский"],
+  ["zh", "中文"],
+  ["ja", "日本語"],
+  ["ar", "العربية"],
+  ["hi", "हिन्दी"],
+  ["gu", "ગુજરાતી"],
+  ["la", "Latina"],
+];
+
 function FieldInput({
   field,
   value,
@@ -34,6 +52,8 @@ function FieldInput({
   invalid,
   inputPlaceholder,
   describedBy,
+  language,
+  onLanguageChange,
 }: {
   field: UiTemplateField;
   value: string;
@@ -41,6 +61,9 @@ function FieldInput({
   invalid: boolean;
   inputPlaceholder?: string;
   describedBy?: string;
+  /** SHOULD-29: per-field language (single-subject mode only). */
+  language?: string | null;
+  onLanguageChange?: (lang: string | null) => void;
 }) {
   const t = useTranslations("metadata");
   const id = `ez-field-${field.id}`;
@@ -91,6 +114,28 @@ function FieldInput({
       <span className="ez-uri" aria-hidden="true">
         {field.property_uri}
       </span>
+      {/* SHOULD-29: per-field language tag, sent to the API on save. */}
+      {onLanguageChange ? (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
+          <label htmlFor={`${id}-lang`} style={{ fontSize: 11, color: "var(--ink-3)" }}>
+            {t("languageLabel")}
+          </label>
+          <select
+            id={`${id}-lang`}
+            className="ez-select"
+            style={{ fontSize: 12, padding: "2px 6px" }}
+            value={language ?? ""}
+            onChange={(e) => onLanguageChange(e.target.value || null)}
+          >
+            <option value="">{t("noLanguage")}</option>
+            {LANG_OPTIONS.map(([code, name]) => (
+              <option key={code} value={code}>
+                {name} ({code})
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
       {invalid ? (
         <span className="ez-error" id={`${id}-error`} role="alert">
           {t("rightsRequired")}
@@ -124,9 +169,13 @@ export default function MetadataForm({
   const t = useTranslations("metadata");
   const { data: templates, error: templatesError } = useTemplates(projectId);
   const single = useMetadata(projectId, bulk ? null : subjectId);
+  const rows = useMetadataRows(projectId, bulk ? null : subjectId);
 
   const [templateSel, setTemplateSel] = useState<string>(templateId ?? "");
   const [values, setValues] = useState<MetadataValuesMap>({});
+  /** SHOULD-29: per-field language tags (uri → ISO 639-1 or null). */
+  const [languages, setLanguages] = useState<Record<string, string | null>>({});
+  const initialLanguages = useRef<Record<string, string | null>>({});
   const [bulkChecked, setBulkChecked] = useState<Record<string, boolean>>({});
   const [bulkValues, setBulkValues] = useState<Record<string, string[]>>({});
   const [rightsError, setRightsError] = useState(false);
@@ -145,6 +194,17 @@ export default function MetadataForm({
   useEffect(() => {
     if (!bulk && single.data) setValues({ ...single.data });
   }, [bulk, single.data]);
+
+  // SHOULD-29: seed per-field languages from the full rows.
+  useEffect(() => {
+    if (bulk || !rows.data) return;
+    const seeded: Record<string, string | null> = {};
+    for (const r of rows.data) {
+      if (r.language) seeded[r.property_uri] = r.language;
+    }
+    initialLanguages.current = seeded;
+    setLanguages(seeded);
+  }, [bulk, rows.data, subjectId]);
 
   // Bulk: fetch every subject once, compute per-field value sets.
   useEffect(() => {
@@ -200,7 +260,15 @@ export default function MetadataForm({
     setSaving(true);
     try {
       const before: MetadataValuesMap = single.data ?? {};
-      await runCommand(ctx, setMetadataOp(ctx, subjectId, before, { ...values }), ["metadata", "items", "search"]);
+      await runCommand(
+        ctx,
+        setMetadataOp(ctx, subjectId, before, { ...values }, "Edit metadata", {
+          languages,
+          beforeLanguages: initialLanguages.current,
+        }),
+        ["metadata", "items", "search"],
+      );
+      initialLanguages.current = { ...languages };
     } finally {
       setSaving(false);
     }
@@ -274,6 +342,12 @@ export default function MetadataForm({
               invalid={rightsError && isRightsField(field)}
               inputPlaceholder={mixed ? t("mixed") : undefined}
               describedBy={mixed ? hintId : undefined}
+              language={bulk ? undefined : (languages[uri] ?? null)}
+              onLanguageChange={
+                bulk
+                  ? undefined
+                  : (lang) => setLanguages((prev) => ({ ...prev, [uri]: lang }))
+              }
             />
             {mixed ? (
               <p id={hintId} className="ez-hint">

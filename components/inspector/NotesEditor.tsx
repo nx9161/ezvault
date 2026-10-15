@@ -38,12 +38,15 @@ export default function NotesEditor({
   note,
   vertical,
   lineNumbers,
+  tabIndex,
   onLanguageChange,
 }: {
   projectId: string;
   note: Note;
   vertical: boolean;
   lineNumbers: boolean;
+  /** SHOULD-34: the note's real 1-based tab index (for the aria-label). */
+  tabIndex: number;
   onLanguageChange: (lang: string) => void;
 }) {
   const t = useTranslations("notes");
@@ -135,7 +138,7 @@ export default function NotesEditor({
     immediatelyRender: false,
     editorProps: {
       attributes: {
-        "aria-label": t("noteTab", { n: 1 }),
+        "aria-label": t("noteTab", { n: tabIndex }),
         role: "textbox",
         "aria-multiline": "true",
       },

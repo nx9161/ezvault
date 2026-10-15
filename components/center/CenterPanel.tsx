@@ -53,6 +53,31 @@ const SORT_MAP = {
   photoCount: "photo_count",
 } as const;
 
+/** SHOULD-16: default direction per sort key (name asc, the rest newest/most first). */
+const SORT_DEFAULT_DIR = {
+  name: "asc",
+  dateAdded: "desc",
+  dateModified: "desc",
+  photoCount: "desc",
+} as const;
+
+function compareItems(a: Item, b: Item, sort: keyof typeof SORT_MAP): number {
+  switch (sort) {
+    case "name":
+      return (a.title || "").localeCompare(b.title || "", undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+    case "dateModified":
+      return new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
+    case "photoCount":
+      return a.photo_count - b.photo_count;
+    case "dateAdded":
+    default:
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+  }
+}
+
 function useItemParams(): string {
   const libraryFilter = useUiStore((s) => s.libraryFilter);
   const activeListId = useUiStore((s) => s.activeListId);
@@ -391,7 +416,49 @@ function ItemGrid({
   );
 }
 
-const TABLE_COLS = "56px minmax(140px,1fr) 70px minmax(100px,1fr) 100px 100px";
+const TABLE_COLS = "56px minmax(140px,1fr) 70px minmax(100px,1fr) minmax(100px,1fr) 100px 100px";
+
+/** SHOULD-16: clickable table header — click to sort, click again to flip. */
+function SortHeader({
+  sortKey,
+  label,
+  headerCell,
+}: {
+  sortKey: "name" | "dateAdded" | "dateModified" | "photoCount";
+  label: string;
+  headerCell: React.CSSProperties;
+}) {
+  const sort = useUiStore((s) => s.sort);
+  const sortDir = useUiStore((s) => s.sortDir);
+  const setSort = useUiStore((s) => s.setSort);
+  const setSortDir = useUiStore((s) => s.setSortDir);
+  const active = sort === sortKey;
+  return (
+    <span
+      role="columnheader"
+      style={headerCell}
+      aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
+    >
+      <button
+        type="button"
+        className="ez-th-sort"
+        onClick={() => {
+          if (active) {
+            setSortDir(sortDir === "asc" ? "desc" : "asc");
+          } else {
+            setSort(sortKey);
+            setSortDir(SORT_DEFAULT_DIR[sortKey]);
+          }
+        }}
+        aria-label={label}
+        title={label}
+      >
+        {label}
+        <span aria-hidden="true">{active ? (sortDir === "asc" ? " ▲" : " ▼") : ""}</span>
+      </button>
+    </span>
+  );
+}
 
 function ItemTable({ items, projectId, label }: { items: Item[]; projectId: string; label: string }) {
   const t = useTranslations("center");
@@ -402,6 +469,14 @@ function ItemTable({ items, projectId, label }: { items: Item[]; projectId: stri
   const setActiveItemId = useUiStore((s) => s.setActiveItemId);
   const parentRef = useRef<HTMLDivElement>(null);
   const rowH = density === "compact" ? 44 : 60;
+
+  // SHOULD-16: Lists column — resolve the item's list ids to names.
+  const { data: listData } = useLists(projectId);
+  const listNames = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const l of listData ?? []) m.set(l.id, l.name);
+    return m;
+  }, [listData]);
 
   const virtualizer = useVirtualizer({
     count: items.length,
@@ -435,11 +510,12 @@ function ItemTable({ items, projectId, label }: { items: Item[]; projectId: stri
         }}
       >
         <span role="columnheader" style={headerCell}>{t("colCover")}</span>
-        <span role="columnheader" style={headerCell}>{t("colTitle")}</span>
-        <span role="columnheader" style={headerCell}>{t("colPhotos")}</span>
+        <SortHeader sortKey="name" label={t("colTitle")} headerCell={headerCell} />
+        <SortHeader sortKey="photoCount" label={t("colPhotos")} headerCell={headerCell} />
         <span role="columnheader" style={headerCell}>{t("colTags")}</span>
-        <span role="columnheader" style={headerCell}>{t("colAdded")}</span>
-        <span role="columnheader" style={headerCell}>{t("colModified")}</span>
+        <span role="columnheader" style={headerCell}>{t("colLists")}</span>
+        <SortHeader sortKey="dateAdded" label={t("colAdded")} headerCell={headerCell} />
+        <SortHeader sortKey="dateModified" label={t("colModified")} headerCell={headerCell} />
       </div>
       <div style={{ position: "relative", height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map((vi) => {
@@ -491,6 +567,9 @@ function ItemTable({ items, projectId, label }: { items: Item[]; projectId: stri
               </span>
               <span role="gridcell" style={{ padding: "4px 12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, color: "var(--ink-2)" }}>
                 {(item.tags ?? []).join(", ") || "—"}
+              </span>
+              <span role="gridcell" style={{ padding: "4px 12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, color: "var(--ink-2)" }} title={(item.lists ?? []).map((id) => listNames.get(id) ?? id).join(", ")}>
+                {(item.lists ?? []).map((id) => listNames.get(id) ?? id).join(", ") || "—"}
               </span>
               <span role="gridcell" style={{ padding: "4px 12px", fontSize: 12, color: "var(--ink-2)" }}>
                 {new Date(item.created_at).toLocaleDateString()}
@@ -789,6 +868,8 @@ export default function CenterPanel({ projectId }: { projectId: string }) {
   const setDensity = useUiStore((s) => s.setDensity);
   const sort = useUiStore((s) => s.sort);
   const setSort = useUiStore((s) => s.setSort);
+  const sortDir = useUiStore((s) => s.sortDir);
+  const setSortDir = useUiStore((s) => s.setSortDir);
   const libraryFilter = useUiStore((s) => s.libraryFilter);
   const activeListId = useUiStore((s) => s.activeListId);
   const activeTagIds = useUiStore((s) => s.activeTagIds);
@@ -834,8 +915,12 @@ export default function CenterPanel({ projectId }: { projectId: string }) {
         (a, b) => (idx.get(a.id) ?? Infinity) - (idx.get(b.id) ?? Infinity),
       );
     }
-    return items;
-  }, [items, manualOrder, activeListId]);
+    // SHOULD-16: the server's sort map only honors created/list_position,
+    // so the four sort keys are applied client-side over the loaded set.
+    // (The `sort` query param stays as a fetch-order hint.)
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...items].sort((a, b) => dir * compareItems(a, b, sort));
+  }, [items, manualOrder, activeListId, sort, sortDir]);
 
   async function handleReorder(draggedId: string, targetId: string) {
     if (!activeListId) return;
@@ -902,7 +987,12 @@ export default function CenterPanel({ projectId }: { projectId: string }) {
           <select
             className="ez-select"
             value={sort}
-            onChange={(e) => setSort(e.target.value as typeof sort)}
+            onChange={(e) => {
+              const next = e.target.value as typeof sort;
+              setSort(next);
+              // A new key starts at its natural direction (SHOULD-16).
+              setSortDir(SORT_DEFAULT_DIR[next]);
+            }}
             aria-label={t("sort")}
           >
             <option value="name">{t("sortName")}</option>

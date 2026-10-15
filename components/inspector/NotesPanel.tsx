@@ -21,6 +21,33 @@ const NotesEditor = dynamic(() => import("./NotesEditor"), {
 
 const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
 
+// SHOULD-33: vertical-writing + line-numbers toggles persist per note id in
+// localStorage. Keyed by note id (not position) so the preference follows
+// the note when tabs reorder.
+const NOTE_PREFS_PREFIX = "ezvault:note-prefs:";
+
+function loadNotePrefs(noteId: string | null): { vertical: boolean; lineNumbers: boolean } {
+  if (!noteId) return { vertical: false, lineNumbers: false };
+  try {
+    const raw = localStorage.getItem(NOTE_PREFS_PREFIX + noteId);
+    if (raw) {
+      const p = JSON.parse(raw) as { vertical?: unknown; lineNumbers?: unknown };
+      return { vertical: !!p.vertical, lineNumbers: !!p.lineNumbers };
+    }
+  } catch {
+    // Corrupt entry — fall through to defaults.
+  }
+  return { vertical: false, lineNumbers: false };
+}
+
+function saveNotePrefs(noteId: string, prefs: { vertical: boolean; lineNumbers: boolean }) {
+  try {
+    localStorage.setItem(NOTE_PREFS_PREFIX + noteId, JSON.stringify(prefs));
+  } catch {
+    // Storage full/blocked — the toggles still work for this session.
+  }
+}
+
 export default function NotesPanel({
   projectId,
   photoId,
@@ -49,7 +76,26 @@ export default function NotesPanel({
     }
   }, [notes, activeId]);
 
+  // SHOULD-33: load the active note's persisted toggles; persist on change.
+  useEffect(() => {
+    const prefs = loadNotePrefs(activeId);
+    setVertical(prefs.vertical);
+    setLineNumbers(prefs.lineNumbers);
+  }, [activeId]);
+
+  function setVerticalPersist(v: boolean) {
+    setVertical(v);
+    if (activeId) saveNotePrefs(activeId, { vertical: v, lineNumbers });
+  }
+
+  function setLineNumbersPersist(v: boolean) {
+    setLineNumbers(v);
+    if (activeId) saveNotePrefs(activeId, { vertical, lineNumbers: v });
+  }
+
   const active = notes.find((n) => n.id === activeId) ?? null;
+  // SHOULD-34: the real tab index (1-based) for the editor's aria-label.
+  const activeIndex = active ? notes.findIndex((n) => n.id === active.id) : -1;
 
   async function createNote() {
     const url = selectionId
@@ -109,7 +155,7 @@ export default function NotesPanel({
           <input
             type="checkbox"
             checked={vertical}
-            onChange={(e) => setVertical(e.target.checked)}
+            onChange={(e) => setVerticalPersist(e.target.checked)}
           />
           {t("verticalWriting")}
         </label>
@@ -117,7 +163,7 @@ export default function NotesPanel({
           <input
             type="checkbox"
             checked={lineNumbers}
-            onChange={(e) => setLineNumbers(e.target.checked)}
+            onChange={(e) => setLineNumbersPersist(e.target.checked)}
           />
           {t("lineNumbers")}
         </label>
@@ -129,6 +175,7 @@ export default function NotesPanel({
           note={active}
           vertical={vertical}
           lineNumbers={lineNumbers}
+          tabIndex={activeIndex + 1}
           onLanguageChange={setLanguage}
         />
       ) : (

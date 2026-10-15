@@ -17,6 +17,7 @@ import { importUndoCommand, refreshAndBroadcast, type OpContext } from "@/lib/co
 import { useOpContext } from "@/components/sidebar/Sidebar";
 import { Dialog, ConfirmDialog } from "@/components/ui/Dialog";
 import { presignBatch, putWithProgress } from "@/lib/import/upload";
+import { sha256File } from "@/lib/import/files";
 
 type Step = "upload" | "analyze" | "map" | "run" | "report";
 
@@ -96,6 +97,8 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
   const tpyInputRef = useRef<HTMLInputElement>(null);
   const assetsInputRef = useRef<HTMLInputElement>(null);
   const relinkInputRef = useRef<HTMLInputElement>(null);
+  /** W2-D: hashing progress while the re-link files are checksummed. */
+  const [hashProgress, setHashProgress] = useState<{ done: number; total: number } | null>(null);
 
   const { data: runJob } = useJob(step === "run" ? runJobId : null);
 
@@ -215,6 +218,14 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
       setRunJobId(rep.job_id);
       // TpyRunResponse carries imported/expected/conflicts — that IS the report.
       setRunReport(rep);
+      // The run POST already emits missing_originals; the useJob GET does NOT
+      // return the report, so seed the re-link list here directly (W2-D).
+      setMissing(
+        ((rep as { missing_originals?: { filename: string; photo_subject_id: string }[] }).missing_originals ?? []).map((m) => ({
+          filename: m.filename,
+          photo_subject_id: m.photo_subject_id,
+        })),
+      );
       // Progress is mirrored by the useJob polling hook; the terminal
       // transition to "report" happens in the effect below.
     } catch (err) {
@@ -250,48 +261,67 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
   }, [step, runJob?.status]);
 
   /**
-   * Advanced re-link: stage the picked originals via the normal presign flow,
-   * match by filename against the missing list, then resolve-missing with
-   * explicit staged_key → photo_subject_id links.
+   * Advanced re-link (W2-D): hash each picked original in-browser, stage via
+   * the normal presign flow with the REAL sha256 (the "relink" placeholder is
+   * rejected server-side), then resolve-missing Path B. The server matches
+   * checksum-first, filename-fallback — the client does no filename matching.
    */
   async function relink(files: FileList | null) {
     if (!files || !runJobId) return;
     setBusy(true);
     try {
       const picked = Array.from(files);
+      // 1. Hash every file first (progress: "Checking file contents…").
+      setHashProgress({ done: 0, total: picked.length });
+      const hashed: { file: File; sha256: string }[] = [];
+      for (const f of picked) {
+        const sha256 = await sha256File(f);
+        hashed.push({ file: f, sha256 });
+        setHashProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
+      }
+      setHashProgress(null);
       const { grants } = await presignBatch(
         projectId,
-        picked.map((f) => ({
-          sha256: "relink",
-          size: f.size,
-          mimetype: f.type || "application/octet-stream",
-          filename: f.name,
+        hashed.map(({ file, sha256 }) => ({
+          sha256,
+          size: file.size,
+          mimetype: file.type || "application/octet-stream",
+          filename: file.name,
         })),
       );
-      const links: { staged_key: string; photo_subject_id: string }[] = [];
+      const relinkFiles: { staged_key: string; filename: string; sha256: string; mimetype: string }[] = [];
       for (const g of grants) {
         // PresignGrant carries no filename — match grants to files by order.
-        const f = picked[grants.indexOf(g)];
-        if (!f) continue;
-        await putWithProgress(g.url, f, f.type || "application/octet-stream", () => {});
-        const miss = missing.find((m) => m.filename === f.name);
-        if (miss) links.push({ staged_key: g.key, photo_subject_id: miss.photo_subject_id });
+        const h = hashed[grants.indexOf(g)];
+        if (!h) continue;
+        await putWithProgress(g.url, h.file, h.file.type || "application/octet-stream", () => {});
+        relinkFiles.push({
+          staged_key: g.key,
+          filename: h.file.name,
+          sha256: h.sha256,
+          mimetype: h.file.type || "application/octet-stream",
+        });
       }
-      if (links.length === 0) {
+      if (relinkFiles.length === 0) {
         pushToast({ message: t("relinkNoMatch"), kind: "error" });
         return;
       }
       const res = await post<{ matched: number; still_missing: { filename: string; photo_subject_id: string }[] }>(
         "/api/import/tpy/resolve-missing",
-        { job_id: runJobId, project_id: projectId, links },
+        { job_id: runJobId, project_id: projectId, files: relinkFiles },
       );
       setMissing(res.still_missing ?? []);
-      pushToast({ message: t("relinkMatched", { count: res.matched }) });
+      if (res.matched === 0) {
+        pushToast({ message: t("relinkNoMatch"), kind: "error" });
+      } else {
+        pushToast({ message: t("relinkMatched", { count: res.matched }) });
+      }
       void refreshAndBroadcast(ctx, ["items"]);
     } catch (err) {
       pushToast({ message: err instanceof Error ? err.message : "re-link failed", kind: "error" });
     } finally {
       setBusy(false);
+      setHashProgress(null);
     }
   }
 
@@ -600,6 +630,11 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
               <button type="button" className="ez-btn ez-btn--sm" disabled={busy} onClick={() => relinkInputRef.current?.click()}>
                 {t("relinkPick")}
               </button>
+              {hashProgress ? (
+                <p style={{ fontSize: 12, color: "var(--ink-2)", margin: "8px 0 0" }} role="status">
+                  {t("hashing")} {hashProgress.done}/{hashProgress.total}
+                </p>
+              ) : null}
               <ul className="ez-mono-list">
                 {missing.slice(0, 50).map((m) => (
                   <li key={m.filename}>{m.filename}</li>

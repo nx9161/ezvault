@@ -160,6 +160,8 @@ interface TreeRowProps {
   onFocusRow: (id: string) => void;
   focusRowById: (id: string) => void;
   registerRow: (id: string, el: HTMLLIElement | null) => void;
+  /** SHOULD-10: search hit counts per list id (renders inline badges). */
+  badges?: Record<string, number>;
 }
 
 function TreeRow({
@@ -178,6 +180,7 @@ function TreeRow({
   onFocusRow,
   focusRowById,
   registerRow,
+  badges,
 }: TreeRowProps) {
   const t = useTranslations("sidebar");
   const tc = useTranslations("app");
@@ -332,7 +335,17 @@ function TreeRow({
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {node.name}
         </span>
-        {typeof node.item_count === "number" ? (
+        {/* SHOULD-10: while searching, the row shows the search hit count
+            instead of the library item count; the old bottom text block is gone. */}
+        {badges?.[node.id] ? (
+          <span
+            className="ez-count ez-count--hit"
+            title={t("searchHits", { count: badges[node.id] })}
+            aria-label={t("searchHits", { count: badges[node.id] })}
+          >
+            {badges[node.id]}
+          </span>
+        ) : typeof node.item_count === "number" ? (
           <span className="ez-count">{node.item_count}</span>
         ) : null}
       </div>
@@ -429,6 +442,7 @@ function TreeRow({
               onFocusRow={onFocusRow}
               focusRowById={focusRowById}
               registerRow={registerRow}
+              badges={badges}
             />
           ))}
         </ul>
@@ -539,6 +553,7 @@ function ListsSection({ projectId }: { projectId: string }) {
               onFocusRow={setFocusId}
               focusRowById={focusRowById}
               registerRow={registerRow}
+              badges={badges}
             />
           ))}
         </ul>
@@ -591,21 +606,6 @@ function ListsSection({ projectId }: { projectId: string }) {
           </button>
         </form>
       ) : null}
-      {badges ? (
-        <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 8 }}>
-          {Object.entries(badges)
-            .filter(([, n]) => n > 0)
-            .slice(0, 8)
-            .map(([listId, n]) => {
-              const node = findNode(tree, listId);
-              return node ? (
-                <div key={listId}>
-                  {node.name}: {n}
-                </div>
-              ) : null;
-            })}
-        </div>
-      ) : null}
     </section>
   );
 }
@@ -616,6 +616,13 @@ function TagsSection({ projectId }: { projectId: string }) {
   const ctx = useOpContext(projectId);
   const { data: tagsData, error, mutate } = useTags(projectId);
   const data = Array.isArray(tagsData) ? tagsData : (tagsData?.items ?? []);
+  // SHOULD-10: search hit counts per tag id (same SWR key as ListsSection — one fetch).
+  const { data: searchData } = useSearch(
+    projectId,
+    useUiStore((s) => s.activeQuery),
+    useUiStore((s) => s.searchScope),
+  );
+  const tagBadges = searchData?.badges;
   const activeTagIds = useUiStore((s) => s.activeTagIds);
   const toggleTag = useUiStore((s) => s.toggleTag);
   const [creating, setCreating] = useState(false);
@@ -674,6 +681,16 @@ function TagsSection({ projectId }: { projectId: string }) {
             >
               <span className="ez-color-dot" style={{ background: tag.color }} aria-hidden="true" />
               {tag.name}
+              {/* SHOULD-10: search hit badge on the chip. */}
+              {tagBadges?.[tag.id] ? (
+                <span
+                  className="ez-count ez-count--hit"
+                  title={t("searchHits", { count: tagBadges[tag.id] })}
+                  aria-label={t("searchHits", { count: tagBadges[tag.id] })}
+                >
+                  {tagBadges[tag.id]}
+                </span>
+              ) : null}
             </button>
           ))}
         </div>

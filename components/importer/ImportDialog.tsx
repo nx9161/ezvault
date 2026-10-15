@@ -12,8 +12,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useUiStore } from "@/lib/store/ui";
-import { useProject, useJob } from "@/lib/api/hooks";
-import { post } from "@/lib/api/client";
+import { useProject, useJob, useTemplates } from "@/lib/api/hooks";
+import { post, patch } from "@/lib/api/client";
 import { mutate } from "swr";
 import { commandBus } from "@/lib/commands/bus";
 import { importUndoCommand, refreshAndBroadcast, type OpContext } from "@/lib/commands/ops";
@@ -60,6 +60,8 @@ interface QueueFile {
   relativePath?: string;
   kind: ImportKind;
   sha256: string;
+  /** SHOULD-18: per-file template override (null/undefined = project default). */
+  templateId?: string | null;
   artifact?: Blob; // HEIC→JPEG
   artifactSha256?: string;
   artifactKey?: string;
@@ -97,6 +99,9 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
   const setTpyOpen = useUiStore((s) => s.setTpyOpen);
   const ctx = useOpContext(projectId);
   const { data: project } = useProject(projectId);
+  const { data: templates } = useTemplates(projectId);
+  /** SHOULD-18: per-file template selects default to the project default. */
+  const defaultTemplateId = project?.default_template_id ?? null;
 
   const [tab, setTab] = useState<Tab>("files");
   const [queue, setQueue] = useState<QueueFile[]>([]);
@@ -368,6 +373,7 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
       if (result.rejected.length > 0) {
         pushToast({ message: t("partialToast", { done: result.accepted.length, failed: result.rejected.length }), kind: "error" });
       }
+      await applyFileTemplates(result.accepted, ready);
       await startJob(result.job_id, ready);
     } catch (err) {
       if (err instanceof Error && err.message === "cancelled") {
@@ -383,6 +389,37 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
   async function startJob(id: string, ready: QueueFile[]) {
     setJobId(id);
     for (const f of ready) patchQueue(f.localId, { status: "processing", progress: 0.97 });
+  }
+
+  // SHOULD-18: apply per-file template choices to the items complete() just
+  // created. Items exist from complete() onward (photos process after), so
+  // this runs before the job starts. Only files whose choice differs from
+  // the project default need a PATCH; skipped duplicates are left alone.
+  async function applyFileTemplates(
+    accepted: { key: string; item_id: string; dedupe: string }[],
+    ready: QueueFile[],
+  ) {
+    const keyToTemplate = new Map<string, string | null>();
+    for (const f of ready) {
+      if (f.key) keyToTemplate.set(f.key, f.templateId ?? null);
+    }
+    for (const a of accepted) {
+      if (a.dedupe === "skipped_duplicate") continue;
+      const choice = keyToTemplate.get(a.key) ?? null;
+      if (choice && choice !== defaultTemplateId) {
+        try {
+          await patch(`/api/projects/${projectId}/items/${a.item_id}`, {
+            template_id: choice,
+          });
+        } catch (err) {
+          // Non-fatal: the item imported fine; only its template is default.
+          pushToast({
+            message: err instanceof Error ? err.message : "template apply failed",
+            kind: "error",
+          });
+        }
+      }
+    }
   }
 
   async function resolveDuplicates() {
@@ -402,6 +439,7 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
         duplicate_policy: "keep_both",
       });
       const ready = queue.filter((f) => f.sha256);
+      await applyFileTemplates(result.accepted, ready);
       await startJob(result.job_id, ready);
     } catch (err) {
       pushToast({ message: err instanceof Error ? err.message : "import failed", kind: "error" });
@@ -578,7 +616,35 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
 
       {queue.length > 0 ? (
         <div style={{ margin: "12px 0" }}>
-          <h3 style={{ fontSize: 13 }}>{t("reviewTitle", { count: queue.length })}</h3>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <h3 style={{ fontSize: 13, margin: 0 }}>{t("reviewTitle", { count: queue.length })}</h3>
+            {/* SHOULD-18: bulk template — sets every file's select at once;
+                per-file selects below can still override individually. */}
+            {templates && templates.length > 0 ? (
+              <label style={{ fontSize: 12, color: "var(--ink-2)" }}>
+                {t("bulkTemplate")}{" "}
+                <select
+                  className="ez-select"
+                  style={{ fontSize: 12 }}
+                  value=""
+                  onChange={(e) => {
+                    const tid = e.target.value || null;
+                    setQueue((q) => q.map((f) => ({ ...f, templateId: tid })));
+                    e.target.value = "";
+                  }}
+                  aria-label={t("bulkTemplate")}
+                >
+                  <option value="">{t("bulkTemplatePick")}</option>
+                  {templates.map((tp) => (
+                    <option key={tp.id} value={tp.id}>
+                      {tp.name}
+                      {tp.id === defaultTemplateId ? ` (${t("defaultTemplate")})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </div>
           <div style={{ maxHeight: 260, overflowY: "auto" }} data-tour="import-review">
             {queue.map((qf) => (
               <div key={qf.localId} className="ez-file-row">
@@ -589,6 +655,26 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
                 <span style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
                   {formatBytes(qf.file.size)}
                 </span>
+                {/* SHOULD-18: per-file template, defaulting to the project default. */}
+                {templates && templates.length > 0 ? (
+                  <select
+                    className="ez-select"
+                    style={{ fontSize: 11, maxWidth: 150 }}
+                    value={qf.templateId ?? defaultTemplateId ?? ""}
+                    onChange={(e) =>
+                      patchQueue(qf.localId, { templateId: e.target.value || null })
+                    }
+                    aria-label={t("fileTemplate", { name: qf.relativePath ?? qf.file.name })}
+                    title={t("fileTemplate", { name: qf.relativePath ?? qf.file.name })}
+                  >
+                    {templates.map((tp) => (
+                      <option key={tp.id} value={tp.id}>
+                        {tp.name}
+                        {tp.id === defaultTemplateId ? ` (${t("defaultTemplate")})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
                 <span className="ez-progress" role="progressbar" aria-valuenow={Math.round(qf.progress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label={qf.file.name}>
                   <span style={{ width: `${Math.round(qf.progress * 100)}%` }} />
                 </span>
@@ -628,6 +714,18 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
                 <option value="keep_both">{t("policyKeepBoth")}</option>
                 <option value="ask">{t("policyAsk")}</option>
               </select>
+            </label>
+            {/* SHOULD-18: page-grouping toggle. Rendered disabled with an honest
+                tooltip (the "Merge items (wave 2)" precedent): the pipeline
+                never splits pages today — one file is always one item — so a
+                live toggle would be a lying affordance. Page splitting is
+                wave-2 parity item #34. */}
+            <label
+              style={{ fontSize: 12, color: "var(--ink-3)" }}
+              title={t("groupIntoItemHint")}
+            >
+              <input type="checkbox" checked disabled style={{ marginRight: 4 }} />
+              {t("groupIntoItem")}
             </label>
             {folderMapping ? (
               <span style={{ fontSize: 11, color: "var(--ink-2)" }}>

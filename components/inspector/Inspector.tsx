@@ -83,6 +83,7 @@ function PhotoStrip({
 
 function SingleItemInspector({ projectId, itemId }: { projectId: string; itemId: string }) {
   const t = useTranslations("inspector");
+  const ts = useTranslations("selections");
   const ctx = useOpContext(projectId);
   const inspectorTab = useUiStore((s) => s.inspectorTab);
   const setInspectorTab = useUiStore((s) => s.setInspectorTab);
@@ -212,6 +213,36 @@ function SingleItemInspector({ projectId, itemId }: { projectId: string; itemId:
               ctx={ctx}
             />
             <PhotoStrip projectId={projectId} itemId={itemId} />
+            {/* SHOULD-22: selection tab strip — one tab per selection with
+                its note-count badge, so a selection is one click away.
+                SelectionsPanel stays the full table with rename/delete. */}
+            {selections.length > 0 ? (
+              <div className="ez-sel-tabs" role="tablist" aria-label={ts("tabsLabel")}>
+                {selections.map((sel) => (
+                  <button
+                    key={sel.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={sel.id === activeSelectionId}
+                    className="ez-sel-tab"
+                    onClick={() => setActiveSelectionId(sel.id)}
+                    title={ts("notesCount", { count: sel.note_count })}
+                  >
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {sel.name}
+                    </span>
+                    {sel.note_count > 0 ? (
+                      <span
+                        className="ez-mini-badge"
+                        aria-label={ts("notesCount", { count: sel.note_count })}
+                      >
+                        ✎{sel.note_count}
+                      </span>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </>
         ) : null}
         {inspectorTab === "metadata" ? (

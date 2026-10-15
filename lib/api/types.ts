@@ -294,14 +294,18 @@ export function adaptMetadataValues(
 /** UI values → wire `SetMetadataRequest` array form. */
 export type MetadataValuesMap = Record<string, string>;
 
+/** SHOULD-29: per-field languages (ISO 639-1). The metadata API accepts a
+ * `language` per value; send it when the user set one, omit otherwise. */
 export function metadataWire(
   values: Record<string, string>,
   datatypes?: Record<string, string>,
+  languages?: Record<string, string | null>,
 ) {
   return Object.entries(values).map(([property_uri, text]) => ({
     property_uri,
     text,
     ...(datatypes?.[property_uri] ? { datatype: datatypes[property_uri] } : {}),
+    ...(languages?.[property_uri] ? { language: languages[property_uri] } : {}),
   }));
 }
 

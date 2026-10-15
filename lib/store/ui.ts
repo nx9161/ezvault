@@ -34,9 +34,12 @@ interface UiState {
   view: ViewMode;
   density: Density;
   sort: SortKey;
+  /** SHOULD-16: per-key direction for the sortable table headers. */
+  sortDir: "asc" | "desc";
   setView: (v: ViewMode) => void;
   setDensity: (d: Density) => void;
   setSort: (s: SortKey) => void;
+  setSortDir: (d: "asc" | "desc") => void;
 
   // --- navigation / filters ---
   libraryFilter: LibraryFilter;
@@ -130,9 +133,11 @@ export const useUiStore = create<UiState>()(
         view: "grid",
         density: "comfortable",
         sort: "dateAdded",
+        sortDir: "desc",
         setView: (view) => set({ view }),
         setDensity: (density) => set({ density }),
         setSort: (sort) => set({ sort }),
+        setSortDir: (sortDir) => set({ sortDir }),
 
         libraryFilter: "all",
         activeListId: null,
