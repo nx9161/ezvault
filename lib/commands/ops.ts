@@ -60,10 +60,22 @@ export async function refreshAndBroadcast(
 function makeCommand(
   label: string,
   scope: string,
-  doFn: () => Promise<void>,
-  undoFn: () => Promise<void>,
+  doFn: (opId: string) => Promise<void>,
+  undoFn: (opId: string) => Promise<void>,
 ): Command {
-  return { id: newClientOpId(), label, scope, do: doFn, undo: undoFn, at: Date.now() };
+  // Per-command op_id: the command's id is the idempotency key for its do().
+  // The bus sends it with every mutation (clientOpId body field or the
+  // x-client-op-id header); the server dedupes via command_log. Undo is a
+  // distinct logical operation and gets its own key.
+  const id = newClientOpId();
+  return {
+    id,
+    label,
+    scope,
+    do: () => doFn(id),
+    undo: () => undoFn(newClientOpId()),
+    at: Date.now(),
+  };
 }
 
 /** Execute a command; on server reject: drop it, toast, refetch. */
@@ -112,15 +124,15 @@ export function renameListOp(
   nextName: string,
 ): Command {
   const before = list.name;
-  return makeCommand("Rename list", "lists", async () => {
+  return makeCommand("Rename list", "lists", async (opId) => {
     await mutate<ListNode[]>(
       key.lists(ctx.projectId),
       (cur) => (cur ?? []).map((l) => (l.id === list.id ? { ...l, name: nextName } : l)),
       { optimisticData: undefined, revalidate: false, populateCache: true, rollbackOnError: true },
     );
-    await patch(`${key.lists(ctx.projectId)}/${list.id}`, { name: nextName }, { opId: newClientOpId() });
-  }, async () => {
-    await patch(`${key.lists(ctx.projectId)}/${list.id}`, { name: before }, { opId: newClientOpId() });
+    await patch(`${key.lists(ctx.projectId)}/${list.id}`, { name: nextName }, { opId: opId });
+  }, async (opId) => {
+    await patch(`${key.lists(ctx.projectId)}/${list.id}`, { name: before }, { opId: opId });
   });
 }
 
@@ -130,11 +142,11 @@ export function moveListOp(
   beforeParent: string | null,
   afterParent: string | null,
 ): Command {
-  return makeCommand("Move list", "lists", async () => {
+  return makeCommand("Move list", "lists", async (opId) => {
     // No dedicated /move route — re-parent via PATCH (UpdateListRequest).
-    await patch(`${key.lists(ctx.projectId)}/${listId}`, { parent_list_id: afterParent }, { opId: newClientOpId() });
-  }, async () => {
-    await patch(`${key.lists(ctx.projectId)}/${listId}`, { parent_list_id: beforeParent }, { opId: newClientOpId() });
+    await patch(`${key.lists(ctx.projectId)}/${listId}`, { parent_list_id: afterParent }, { opId: opId });
+  }, async (opId) => {
+    await patch(`${key.lists(ctx.projectId)}/${listId}`, { parent_list_id: beforeParent }, { opId: opId });
   });
 }
 
@@ -149,7 +161,7 @@ export function reorderListItemsOp(
   prevOrder: string[],
   nextOrder: string[],
 ): Command {
-  async function write(order: string[], prev: string[]) {
+  async function write(opId: string, order: string[], prev: string[]) {
     const prevIdx = new Map(prev.map((id, i) => [id, i]));
     await Promise.all(
       order.flatMap((id, i) =>
@@ -158,7 +170,7 @@ export function reorderListItemsOp(
               post(
                 `${key.lists(ctx.projectId)}/${listId}/items`,
                 { item_id: id, position: i },
-                { opId: newClientOpId() },
+                { opId: opId },
               ),
             ]
           : [],
@@ -168,18 +180,18 @@ export function reorderListItemsOp(
   return makeCommand(
     "Reorder items",
     "items",
-    () => write(nextOrder, prevOrder),
-    () => write(prevOrder, nextOrder),
+    (opId) => write(opId, nextOrder, prevOrder),
+    (opId) => write(opId, prevOrder, nextOrder),
   );
 }
 
 export function deleteListOp(ctx: OpContext, list: ListNode): Command {
-  return makeCommand("Delete list", "lists", async () => {
-    await del(`${key.lists(ctx.projectId)}/${list.id}`, undefined, { opId: newClientOpId() });
-  }, async () => {
+  return makeCommand("Delete list", "lists", async (opId) => {
+    await del(`${key.lists(ctx.projectId)}/${list.id}`, undefined, { opId: opId });
+  }, async (opId) => {
     // Re-create with the same id is not possible; restore as a new list
     // with the same name/color/parent (items were unfiled, not deleted).
-    await post(key.lists(ctx.projectId), { name: list.name, parent_list_id: list.parent_list_id, color: list.color }, { opId: newClientOpId() });
+    await post(key.lists(ctx.projectId), { name: list.name, parent_list_id: list.parent_list_id, color: list.color }, { opId: opId });
   });
 }
 
@@ -187,37 +199,37 @@ export function deleteListOp(ctx: OpContext, list: ListNode): Command {
 
 export function renameTagOp(ctx: OpContext, tag: Tag, nextName: string): Command {
   const before = tag.name;
-  return makeCommand("Rename tag", "tags", async () => {
+  return makeCommand("Rename tag", "tags", async (opId) => {
     await mutate<Tag[]>(
       key.tags(ctx.projectId),
       (cur) => (cur ?? []).map((t) => (t.id === tag.id ? { ...t, name: nextName } : t)),
       { revalidate: false, populateCache: true, rollbackOnError: true },
     );
-    await patch(`${key.tags(ctx.projectId)}/${tag.id}`, { name: nextName }, { opId: newClientOpId() });
-  }, async () => {
-    await patch(`${key.tags(ctx.projectId)}/${tag.id}`, { name: before }, { opId: newClientOpId() });
+    await patch(`${key.tags(ctx.projectId)}/${tag.id}`, { name: nextName }, { opId: opId });
+  }, async (opId) => {
+    await patch(`${key.tags(ctx.projectId)}/${tag.id}`, { name: before }, { opId: opId });
   });
 }
 
 export function deleteTagOp(ctx: OpContext, tag: Tag): Command {
-  return makeCommand("Delete tag", "tags", async () => {
-    await del(`${key.tags(ctx.projectId)}/${tag.id}`, undefined, { opId: newClientOpId() });
-  }, async () => {
-    await post(key.tags(ctx.projectId), { name: tag.name, color: tag.color }, { opId: newClientOpId() });
+  return makeCommand("Delete tag", "tags", async (opId) => {
+    await del(`${key.tags(ctx.projectId)}/${tag.id}`, undefined, { opId: opId });
+  }, async (opId) => {
+    await post(key.tags(ctx.projectId), { name: tag.name, color: tag.color }, { opId: opId });
   });
 }
 
 export function recolorTagOp(ctx: OpContext, tag: Tag, color: string): Command {
   const before = tag.color;
-  return makeCommand("Change tag color", "tags", async () => {
+  return makeCommand("Change tag color", "tags", async (opId) => {
     await mutate<Tag[]>(
       key.tags(ctx.projectId),
       (cur) => (cur ?? []).map((t) => (t.id === tag.id ? { ...t, color } : t)),
       { revalidate: false, populateCache: true, rollbackOnError: true },
     );
-    await patch(`${key.tags(ctx.projectId)}/${tag.id}`, { color }, { opId: newClientOpId() });
-  }, async () => {
-    await patch(`${key.tags(ctx.projectId)}/${tag.id}`, { color: before }, { opId: newClientOpId() });
+    await patch(`${key.tags(ctx.projectId)}/${tag.id}`, { color }, { opId: opId });
+  }, async (opId) => {
+    await patch(`${key.tags(ctx.projectId)}/${tag.id}`, { color: before }, { opId: opId });
   });
 }
 
@@ -237,10 +249,10 @@ export function attachTagsOp(
     ? { op: "remove_tags", tag_ids: [tagId] }
     : { op: "add_tags", tag_ids: [tagId] };
   const url = `/api/projects/${ctx.projectId}/items/bulk`;
-  return makeCommand(label, "tags", async () => {
-    await post(url, { item_ids: subjectIds, ops: [op] }, { opId: newClientOpId() });
-  }, async () => {
-    await post(url, { item_ids: subjectIds, ops: [inverse] }, { opId: newClientOpId() });
+  return makeCommand(label, "tags", async (opId) => {
+    await post(url, { item_ids: subjectIds, ops: [op] }, { opId: opId });
+  }, async (opId) => {
+    await post(url, { item_ids: subjectIds, ops: [inverse] }, { opId: opId });
   });
 }
 
@@ -254,32 +266,32 @@ export function trashSubjectsOp(
 ): Command {
   // Trash rides the bulk-items endpoint (single txn + single rev bump).
   const url = `/api/projects/${ctx.projectId}/items/bulk`;
-  return makeCommand(label, "trash", async () => {
-    await post(url, { item_ids: subjectIds, ops: [{ op: "trash", reason }] }, { opId: newClientOpId() });
-  }, async () => {
+  return makeCommand(label, "trash", async (opId) => {
+    await post(url, { item_ids: subjectIds, ops: [{ op: "trash", reason }] }, { opId: opId });
+  }, async (opId) => {
     for (const sid of subjectIds) {
-      await post(`/api/projects/${ctx.projectId}/trash/${sid}/restore`, {}, { opId: newClientOpId() });
+      await post(`/api/projects/${ctx.projectId}/trash/${sid}/restore`, {}, { opId: opId });
     }
   });
 }
 
 export function restoreTrashOp(ctx: OpContext, subjectIds: string[]): Command {
-  return makeCommand("Restore from trash", "trash", async () => {
+  return makeCommand("Restore from trash", "trash", async (opId) => {
     for (const sid of subjectIds) {
-      await post(`/api/projects/${ctx.projectId}/trash/${sid}/restore`, {}, { opId: newClientOpId() });
+      await post(`/api/projects/${ctx.projectId}/trash/${sid}/restore`, {}, { opId: opId });
     }
-  }, async () => {
+  }, async (opId) => {
     for (const sid of subjectIds) {
-      await post(`/api/projects/${ctx.projectId}/subjects/${sid}/trash`, { reason: "user" }, { opId: newClientOpId() });
+      await post(`/api/projects/${ctx.projectId}/subjects/${sid}/trash`, { reason: "user" }, { opId: opId });
     }
   });
 }
 
 export function emptyTrashOp(ctx: OpContext): Command {
   // Irreversible server-side — undo() explains instead of pretending.
-  return makeCommand("Empty trash", "trash", async () => {
-    await post(`/api/projects/${ctx.projectId}/trash/empty`, {}, { opId: newClientOpId() });
-  }, async () => {
+  return makeCommand("Empty trash", "trash", async (opId) => {
+    await post(`/api/projects/${ctx.projectId}/trash/empty`, {}, { opId: opId });
+  }, async (opId) => {
     ctx.toast("Emptying the trash is irreversible — nothing to undo.", "error");
   });
 }
@@ -296,12 +308,12 @@ export function mergeItemsOp(
   // nothing and says so honestly instead of promising something pending.
   void itemIds;
   void targetId;
-  return makeCommand("Merge items", "items", async () => {
+  return makeCommand("Merge items", "items", async (opId) => {
     ctx.toast(
       "Merging items ships in wave 2 — the backend merge endpoint (photo reassignment) does not exist yet. Nothing was changed.",
       "error",
     );
-  }, async () => {
+  }, async (opId) => {
     /* nothing was done — nothing to undo */
   });
 }
@@ -316,10 +328,10 @@ export function setMetadataOp(
   label = "Edit metadata",
 ): Command {
   const url = `/api/projects/${ctx.projectId}/subjects/${subjectId}/metadata`;
-  return makeCommand(label, "metadata", async () => {
-    await patch(url, { values: metadataWire(after), replace: true }, { opId: newClientOpId() });
-  }, async () => {
-    await patch(url, { values: metadataWire(before), replace: true }, { opId: newClientOpId() });
+  return makeCommand(label, "metadata", async (opId) => {
+    await patch(url, { values: metadataWire(after), replace: true }, { opId: opId });
+  }, async (opId) => {
+    await patch(url, { values: metadataWire(before), replace: true }, { opId: opId });
   });
 }
 
@@ -331,7 +343,7 @@ export function bulkMetadataOp(
 ): Command {
   // Snapshot every subject first (immutable-value semantics make inverses unsound).
   let befores: Map<string, MetadataValuesMap> | null = null;
-  const cmd = makeCommand(label, "metadata", async () => {
+  const cmd = makeCommand(label, "metadata", async (opId) => {
     befores = new Map<string, MetadataValuesMap>();
     for (const sid of subjectIds) {
       const cur = await api<{ values: { property_uri: string; text: string }[] }>(
@@ -339,11 +351,11 @@ export function bulkMetadataOp(
       ).then((r) => adaptMetadataValues(r.values));
       befores.set(sid, cur);
     }
-    await post(`/api/projects/${ctx.projectId}/metadata/bulk`, { subject_ids: subjectIds, values: metadataWire(values) }, { opId: newClientOpId() });
-  }, async () => {
+    await post(`/api/projects/${ctx.projectId}/metadata/bulk`, { subject_ids: subjectIds, values: metadataWire(values) }, { opId: opId });
+  }, async (opId) => {
     if (!befores) return;
     for (const [sid, before] of befores) {
-      await patch(`/api/projects/${ctx.projectId}/subjects/${sid}/metadata`, { values: metadataWire(before), replace: true }, { opId: newClientOpId() });
+      await patch(`/api/projects/${ctx.projectId}/subjects/${sid}/metadata`, { values: metadataWire(before), replace: true }, { opId: opId });
     }
   });
   return cmd;
@@ -357,10 +369,10 @@ export function setEditsOp(
   before: PhotoEdits,
   after: PhotoEdits,
 ): Command {
-  return makeCommand("Edit photo", "edits", async () => {
-    await post(`/api/projects/${ctx.projectId}/photos/${photoId}/edits`, { edits: after }, { opId: newClientOpId() });
-  }, async () => {
-    await post(`/api/projects/${ctx.projectId}/photos/${photoId}/edits`, { edits: before }, { opId: newClientOpId() });
+  return makeCommand("Edit photo", "edits", async (opId) => {
+    await post(`/api/projects/${ctx.projectId}/photos/${photoId}/edits`, { edits: after }, { opId: opId });
+  }, async (opId) => {
+    await post(`/api/projects/${ctx.projectId}/photos/${photoId}/edits`, { edits: before }, { opId: opId });
   });
 }
 
@@ -369,10 +381,10 @@ export function revertEditsOp(
   photoId: string,
   before: PhotoEdits,
 ): Command {
-  return makeCommand("Revert to original", "edits", async () => {
-    await post(`/api/projects/${ctx.projectId}/photos/${photoId}/revert`, {}, { opId: newClientOpId() });
-  }, async () => {
-    await post(`/api/projects/${ctx.projectId}/photos/${photoId}/edits`, { edits: before }, { opId: newClientOpId() });
+  return makeCommand("Revert to original", "edits", async (opId) => {
+    await post(`/api/projects/${ctx.projectId}/photos/${photoId}/revert`, {}, { opId: opId });
+  }, async (opId) => {
+    await post(`/api/projects/${ctx.projectId}/photos/${photoId}/edits`, { edits: before }, { opId: opId });
   });
 }
 
@@ -394,20 +406,20 @@ export function updateSelectionOp(
     ...(b.template_id !== undefined ? { template_id: b.template_id } : {}),
   });
   const before = { name: selection.name, x: selection.x, y: selection.y, w: selection.w, h: selection.h, template_id: selection.template_id };
-  return makeCommand(label, "selections", async () => {
-    await patch(`/api/projects/${ctx.projectId}/selections/${selection.id}`, wire(patchBody), { opId: newClientOpId() });
-  }, async () => {
-    await patch(`/api/projects/${ctx.projectId}/selections/${selection.id}`, wire(before), { opId: newClientOpId() });
+  return makeCommand(label, "selections", async (opId) => {
+    await patch(`/api/projects/${ctx.projectId}/selections/${selection.id}`, wire(patchBody), { opId: opId });
+  }, async (opId) => {
+    await patch(`/api/projects/${ctx.projectId}/selections/${selection.id}`, wire(before), { opId: opId });
   });
 }
 
 export function deleteSelectionOp(ctx: OpContext, selection: Selection): Command {
-  return makeCommand("Delete selection", "selections", async () => {
-    await del(`/api/projects/${ctx.projectId}/selections/${selection.id}`, undefined, { opId: newClientOpId() });
-  }, async () => {
+  return makeCommand("Delete selection", "selections", async (opId) => {
+    await del(`/api/projects/${ctx.projectId}/selections/${selection.id}`, undefined, { opId: opId });
+  }, async (opId) => {
     await post(`/api/projects/${ctx.projectId}/photos/${selection.photo_id}/selections`, {
       name: selection.name, x: selection.x, y: selection.y, width: selection.w, height: selection.h, template_id: selection.template_id,
-    }, { opId: newClientOpId() });
+    }, { opId: opId });
   });
 }
 
@@ -419,12 +431,12 @@ export function importUndoCommand(
   label: string,
 ): Command {
   return makeCommand(label, "import",
-    async () => {
+    async (opId) => {
       // do() = the import already happened via the upload flow; redo is manual.
       ctx.toast("Re-running an import is manual — open Import and choose the files again.", "info");
     },
-    async () => {
-      await post(`/api/jobs/${jobId}/undo`, {}, { opId: newClientOpId() });
+    async (opId) => {
+      await post(`/api/jobs/${jobId}/undo`, {}, { opId: opId });
     },
   );
 }

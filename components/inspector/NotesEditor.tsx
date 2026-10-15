@@ -92,13 +92,16 @@ export default function NotesEditor({
       sessionBefore.current = after ?? before;
       return;
     }
+    // Per-command op_id: the do() carries the command's own id; undo is a
+    // distinct logical operation with its own key.
+    const opId = newClientOpId();
     const cmd: Command = {
-      id: newClientOpId(),
+      id: opId,
       label: "Edit note",
       scope: "notes",
       at: Date.now(),
       do: async () => {
-        await patch(noteUrl, { state: after }, { opId: newClientOpId() });
+        await patch(noteUrl, { state: after }, { opId });
       },
       undo: async () => {
         await patch(noteUrl, { state: before }, { opId: newClientOpId() });
