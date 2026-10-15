@@ -78,6 +78,7 @@ function ItemCard({
   onFocus,
   registerRef,
   onSelectClick,
+  tagColorMap,
 }: {
   item: Item;
   projectId: string;
@@ -86,6 +87,8 @@ function ItemCard({
   onFocus: () => void;
   registerRef: (id: string, el: HTMLDivElement | null) => void;
   onSelectClick: (e: React.MouseEvent, item: Item) => void;
+  /** name -> real tag color; unknown names render neutral (D-M4). */
+  tagColorMap: Map<string, string>;
 }) {
   const t = useTranslations("center");
   const toggleSelect = useUiStore((s) => s.toggleSelect);
@@ -168,7 +171,11 @@ function ItemCard({
         {(item.tags?.length ?? 0) > 0 ? (
           <span className="ez-tag-dots" aria-hidden="true" title={item.tags!.join(", ")}>
             {item.tags!.slice(0, 5).map((name) => (
-              <span key={name} className="ez-color-dot" style={{ background: "var(--accent)" }} />
+              <span
+                key={name}
+                className="ez-color-dot"
+                style={{ background: tagColorMap.get(name) ?? "var(--ink-3)" }}
+              />
             ))}
             {item.tags!.length > 5 ? (
               <span className="ez-more">+{item.tags!.length - 5}</span>
@@ -227,6 +234,12 @@ function ItemGrid({
     else refs.current.delete(id);
   }, []);
   const anchorRef = useRef<string | null>(null);
+  // D-M4: real tag colors on card dots (neutral when a tag has no color).
+  const { data: tagsData } = useTags(projectId);
+  const tagColorMap = useMemo(
+    () => new Map(tagListOf(tagsData).map((tg) => [tg.name, tg.color])),
+    [tagsData],
+  );
 
   /** Click selection: plain = single, Ctrl/Cmd = toggle, Shift = range. */
   function onSelectClick(e: React.MouseEvent, item: Item) {
@@ -309,6 +322,7 @@ function ItemGrid({
                 onFocus={() => setFocusId(item.id)}
                 registerRef={registerRef}
                 onSelectClick={onSelectClick}
+                tagColorMap={tagColorMap}
               />
             </div>
           );
