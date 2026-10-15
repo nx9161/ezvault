@@ -57,6 +57,26 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
   const [step, setStep] = useState<Step>("upload");
   const [tpyFile, setTpyFile] = useState<File | null>(null);
   const [assetsFile, setAssetsFile] = useState<File | null>(null);
+  // D-M6: explicit project-kind choice before the pickers.
+  const [projectKind, setProjectKind] = useState<"standard" | "advanced" | null>(null);
+  const kindStandardRef = useRef<HTMLButtonElement>(null);
+  const kindAdvancedRef = useRef<HTMLButtonElement>(null);
+  function kindCardKeys(e: React.KeyboardEvent) {
+    if (
+      e.key === "ArrowRight" ||
+      e.key === "ArrowDown" ||
+      e.key === "ArrowLeft" ||
+      e.key === "ArrowUp"
+    ) {
+      e.preventDefault();
+      const isStandard = e.currentTarget === kindStandardRef.current;
+      (isStandard ? kindAdvancedRef : kindStandardRef).current?.focus();
+    }
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      (e.currentTarget as HTMLButtonElement).click();
+    }
+  }
   const [magicOk, setMagicOk] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
@@ -145,7 +165,7 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
       const rep = await post<RunReport & { job_id: string }>("/api/import/tpy/run", {
         job_id: stagingJobId,
         project_id: projectId,
-        mode: assetsFile ? "standard" : "advanced",
+        mode: projectKind ?? (assetsFile ? "standard" : "advanced"),
         duplicate_policy: conflictPolicy === "skip" ? "skip" : conflictPolicy === "copy" ? "keep_both" : "skip",
         template_map,
       });
@@ -252,6 +272,57 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
         <div>
           <p className="ez-notice">{t("tpyHint")}</p>
           <p className="ez-notice">{t("mobileWarning")}</p>
+          {projectKind === null ? (
+            <div className="ez-kind-cards" role="radiogroup" aria-label={t("kindGroupLabel")}>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={false}
+                className="ez-kind-card"
+                ref={kindStandardRef}
+                onClick={() => setProjectKind("standard")}
+                onKeyDown={kindCardKeys}
+              >
+                <strong>{t("kindStandardTitle")}</strong>
+                <span>{t("kindStandardBody")}</span>
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={false}
+                className="ez-kind-card"
+                ref={kindAdvancedRef}
+                onClick={() => setProjectKind("advanced")}
+                onKeyDown={kindCardKeys}
+              >
+                <strong>{t("kindAdvancedTitle")}</strong>
+                <span>{t("kindAdvancedBody")}</span>
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="ez-kind-chosen">
+                <span>
+                  {projectKind === "standard" ? t("kindStandardTitle") : t("kindAdvancedTitle")}
+                </span>
+                <button
+                  type="button"
+                  className="ez-btn ez-btn--sm ez-btn--ghost"
+                  onClick={() => {
+                    setProjectKind(null);
+                    setAssetsFile(null);
+                  }}
+                >
+                  {t("kindChange")}
+                </button>
+              </div>
+              {projectKind === "advanced" ? (
+                <p className="ez-notice">{t("relinkBody")}</p>
+              ) : null}
+            </>
+          )}
+          {projectKind !== null ? (
+          <>
           <div style={{ display: "flex", gap: 8, margin: "12px 0", flexWrap: "wrap" }}>
             <input
               ref={tpyInputRef}
@@ -278,9 +349,11 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
                 e.target.value = "";
               }}
             />
-            <button type="button" className="ez-btn" onClick={() => assetsInputRef.current?.click()}>
-              {t("assetsLabel")}
-            </button>
+            {projectKind === "standard" ? (
+              <button type="button" className="ez-btn" onClick={() => assetsInputRef.current?.click()}>
+                {t("assetsLabel")}
+              </button>
+            ) : null}
           </div>
           {tpyFile ? (
             <p style={{ fontSize: 13 }}>
@@ -301,18 +374,36 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
-                const f = Array.from(e.dataTransfer.files).find((x) => x.name.endsWith(".tpy"));
-                if (f) void pickTpy(f);
+                const files = Array.from(e.dataTransfer.files);
+                const tpy = files.find((x) => x.name.endsWith(".tpy"));
+                if (tpy) void pickTpy(tpy);
+                // Standard-mode zip drops route to the assets picker.
+                if (projectKind === "standard") {
+                  const zip = files.find((x) => x.name.endsWith(".zip"));
+                  if (zip) setAssetsFile(zip);
+                }
               }}
             >
               {t("dropTpy")}
             </p>
           )}
           <div className="ez-dialog-foot" style={{ border: 0, padding: "12px 0 0" }}>
-            <button type="button" className="ez-btn ez-btn--primary" disabled={!tpyFile || magicOk === false || busy} onClick={doUploadAndAnalyze}>
+            <button
+              type="button"
+              className="ez-btn ez-btn--primary"
+              disabled={
+                !tpyFile ||
+                magicOk === false ||
+                busy ||
+                (projectKind === "standard" && !assetsFile)
+              }
+              onClick={doUploadAndAnalyze}
+            >
               {ta("next")}
             </button>
           </div>
+          </>
+          ) : null}
         </div>
       ) : null}
 
