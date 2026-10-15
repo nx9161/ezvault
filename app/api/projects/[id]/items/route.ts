@@ -45,7 +45,7 @@ export const GET = handle(async (req: Request, ctx: Ctx) => {
     // A1: read the trigger-maintained per-scope vectors (expression matches
     // the search_documents_gin_all index).
     textJoin = `LEFT JOIN search_documents sd ON sd.subject_id = s.id`;
-    filters.push(`sd.doc @@ (websearch_to_tsquery('english', $${p}) || websearch_to_tsquery('simple', $${p}))`);
+    filters.push(`(sd.doc_meta || sd.doc_notes || sd.doc_tags) @@ (websearch_to_tsquery('english', $${p}) || websearch_to_tsquery('simple', $${p}))`);
     params.push(q);
     p++;
   }

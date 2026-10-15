@@ -10,13 +10,29 @@ export const maxDuration = 300;
 type Ctx = { params: Promise<{ id: string }> };
 
 /**
+ * Scope → precomputed tsvector expression on search_documents (A1).
+ * The vecExpr text must match the indexed expressions exactly so the
+ * planner uses the GIN indexes (plain per-column for scoped searches,
+ * search_documents_gin_all for the scope=all concatenation).
+ */
+const VEC_EXPRS: Record<SearchScope, string> = {
+  all: `(sd.doc_meta || sd.doc_notes || sd.doc_tags)`,
+  metadata: `sd.doc_meta`,
+  notes: `sd.doc_notes`,
+  tags: `sd.doc_tags`,
+};
+
+function parseScope(raw: string | null): SearchScope {
+  return raw === 'metadata' || raw === 'notes' || raw === 'tags' ? raw : 'all';
+}
+
+/**
  * GET /api/projects/[id]/search?q=&scope=
- * FTS over metadata+notes+tags. Vectors are computed per request (scope-
- * selectable: metadata/notes/tags/all) — the trigger-maintained
- * search_documents table is NOT the read path yet (deferred: per-scope
- * tsvector columns + doctext; see audit). Per-keystroke cost is 3
- * project-wide GROUP BY aggregations + per-row to_tsvector — acceptable
- * for a single user, revisit if the corpus grows past ~10k subjects.
+ * FTS over metadata+notes+tags, read from the trigger-maintained
+ * search_documents table (A1): per-scope tsvector columns (doc_meta,
+ * doc_notes, doc_tags) + doctext for ts_headline. Scope selects which
+ * precomputed vector participates — no per-request aggregation, no
+ * per-row to_tsvector.
  * `websearch_to_tsquery` english+simple, AND default, "phrase" supported,
  * ranked by ts_rank_cd, snippets via ts_headline.
  *
@@ -30,63 +46,31 @@ export const GET = handle(async (req: Request, ctx: Ctx) => {
   await requireProject(id);
   const url = new URL(req.url);
   const q = (url.searchParams.get('q') ?? '').slice(0, 500);
-  const scope = (url.searchParams.get('scope') ?? 'all') as SearchScope;
+  const scope = parseScope(url.searchParams.get('scope'));
   const { limit, offset } = pagination(url, 100);
 
   if (isEmptyQuery(q)) {
     return ok({ query: q, hits: [], badges: {} });
   }
 
-  // Scope selects which field vector/text participate (default: all three).
-  const useMeta = scope === 'all' || scope === 'metadata';
-  const useNotes = scope === 'all' || scope === 'notes';
-  const useTags = scope === 'all' || scope === 'tags';
+  // vecExpr comes from a fixed allowlist keyed by the validated scope —
+  // never from raw user input.
+  const vecExpr = VEC_EXPRS[scope];
 
   const rows = await queryRaw<{
     subject_id: string; subject_kind: string; rank: number; snippet: string | null;
   }>(
     `WITH q AS (
        SELECT (websearch_to_tsquery('english', $2) || websearch_to_tsquery('simple', $2)) AS query
-     ),
-     agg AS (
-       SELECT s.id AS subject_id, s.kind AS subject_kind,
-         (CASE WHEN $4 THEN to_tsvector('english', COALESCE(mt.v_meta,'')) || to_tsvector('simple', COALESCE(mt.v_meta,'')) ELSE ''::tsvector END
-          || CASE WHEN $5 THEN to_tsvector('english', COALESCE(nt.v_text,'')) || to_tsvector('simple', COALESCE(nt.v_text,'')) ELSE ''::tsvector END
-          || CASE WHEN $6 THEN to_tsvector('english', COALESCE(tt.v_tags,'')) || to_tsvector('simple', COALESCE(tt.v_tags,'')) ELSE ''::tsvector END) AS vec,
-         (CASE WHEN $4 THEN COALESCE(mt.v_meta,'') ELSE '' END || ' ' ||
-          CASE WHEN $5 THEN COALESCE(nt.v_text,'') ELSE '' END || ' ' ||
-          CASE WHEN $6 THEN COALESCE(tt.v_tags,'') ELSE '' END) AS doctext
-       FROM subjects s
-       LEFT JOIN (
-         SELECT m.subject_id, string_agg(mv.text, ' ') AS v_meta
-         FROM metadata m JOIN metadata_values mv ON mv.value_id = m.value_id
-         WHERE mv.datatype NOT IN (
-           'http://www.w3.org/2001/XMLSchema#boolean',
-           'http://www.w3.org/2001/XMLSchema#hexBinary',
-           'http://www.w3.org/2001/XMLSchema#base64Binary',
-           'http://www.w3.org/1999/02/22-rdf-syntax-ns#HTML',
-           'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString',
-           'http://www.w3.org/1999/02/22-rdf-syntax-ns#XMLLiteral')
-         GROUP BY m.subject_id
-       ) mt ON mt.subject_id = s.id
-       LEFT JOIN (
-         SELECT subject_id, string_agg(text, ' ') AS v_text FROM notes
-         WHERE deleted_at IS NULL GROUP BY subject_id
-       ) nt ON nt.subject_id = s.id
-       LEFT JOIN (
-         SELECT tg.subject_id, string_agg(t.name::text, ' ') AS v_tags
-         FROM taggings tg JOIN tags t ON t.id = tg.tag_id GROUP BY tg.subject_id
-       ) tt ON tt.subject_id = s.id
-       WHERE s.project_id = $1
      )
-     SELECT a.subject_id, a.subject_kind,
-            ts_rank_cd(a.vec, q.query) AS rank,
-            ts_headline('english', a.doctext, q.query, $3) AS snippet
-     FROM agg a, q
-     WHERE a.vec @@ q.query
+     SELECT sd.subject_id, sd.subject_kind,
+            ts_rank_cd(${vecExpr}, q.query) AS rank,
+            ts_headline('english', sd.doctext, q.query, $3) AS snippet
+     FROM search_documents sd, q
+     WHERE sd.project_id = $1 AND ${vecExpr} @@ q.query
      ORDER BY rank DESC
-     LIMIT $7 OFFSET $8`,
-    [id, q, headlineOptions(), useMeta, useNotes, useTags, limit, offset],
+     LIMIT $4 OFFSET $5`,
+    [id, q, headlineOptions(), limit, offset],
   );
 
   const hits = rows.map((r) => ({
