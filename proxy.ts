@@ -51,6 +51,35 @@ function tokenBucketOk(key: string): boolean {
   return true;
 }
 
+/**
+ * Build the Content-Security-Policy header value.
+ *
+ * The R2 host is read from env at request time (the presigned URLs the R2
+ * driver mints live on https://<accountId>.r2.cloudflarestorage.com — F1):
+ * upload PUTs and the 302-redirected viewer fetches/images would otherwise
+ * be connect-src/img-src blocked in production. When R2 env is absent
+ * (local dev -> the local driver serves same-origin), no R2 host is added
+ * and local behavior is unchanged. script-src stays strict — no
+ * unsafe-inline, ever.
+ */
+export function buildCspHeader(r2AccountId?: string | null): string {
+  const r2Hosts = r2AccountId ? ['https://*.r2.cloudflarestorage.com'] : [];
+  const imgSrc = ["'self'", 'blob:', 'data:', ...r2Hosts].join(' ');
+  const connectSrc = ["'self'", ...r2Hosts].join(' ');
+  return [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'", // TipTap/prose needs inline styles
+    `img-src ${imgSrc}`,
+    `connect-src ${connectSrc}`,
+    "font-src 'self' data:",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    'upgrade-insecure-requests',
+  ].join('; ');
+}
+
 export function proxy(req: NextRequest): NextResponse {
   const { pathname } = req.nextUrl;
 
@@ -77,23 +106,10 @@ export function proxy(req: NextRequest): NextResponse {
 
   const res = NextResponse.next();
 
-  // Strict CSP — zero inline scripts. (Vercel Authentication challenge
-  // pages are platform-hosted and unaffected.)
-  res.headers.set(
-    'Content-Security-Policy',
-    [
-      "default-src 'self'",
-      "script-src 'self'", // no unsafe-inline, ever
-      "style-src 'self' 'unsafe-inline'", // TipTap/prose needs inline styles
-      "img-src 'self' blob: data:",
-      "connect-src 'self'",
-      "font-src 'self' data:",
-      "frame-ancestors 'none'",
-      "object-src 'none'",
-      "base-uri 'self'",
-      'upgrade-insecure-requests',
-    ].join('; '),
-  );
+  // Strict CSP — zero inline scripts. R2 host derived from env at request
+  // time (F1). (Vercel Authentication challenge pages are platform-hosted
+  // and unaffected.)
+  res.headers.set('Content-Security-Policy', buildCspHeader(process.env.R2_ACCOUNT_ID));
   res.headers.set('X-Frame-Options', 'DENY');
   res.headers.set('X-Content-Type-Options', 'nosniff');
   res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');

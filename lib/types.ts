@@ -533,6 +533,30 @@ export interface PresignResponse {
   grants: PresignGrant[];
 }
 
+/**
+ * One staged file confirmed at POST /api/import/complete (F2).
+ *
+ * listId: the list_id carried on the folder-session grant — the server
+ * files the new photo into that list in the SAME transaction as photo
+ * creation. Accepts the snake_case alias `list_id` on the wire. May also
+ * be resolved server-side from `relativePath` against the job checkpoint's
+ * dir_lists for folder jobs (see CONTRACT.md § "Import /complete — filing").
+ *
+ * relativePath: the client's folder-relative path (e.g. "a/b/photo.jpg").
+ * Stored as photos.relative_path — audit only, never rendered or exported.
+ * Accepts the snake_case alias `relative_path` on the wire (the current
+ * client already sends it).
+ */
+export interface ImportCompleteFile {
+  key: string;
+  sha256: string;
+  filename?: string;
+  listId?: UUID | null;
+  list_id?: UUID | null;
+  relativePath?: string;
+  relative_path?: string;
+}
+
 export interface ImportCompleteRequest {
   job_id: UUID;
   project_id: UUID;
@@ -542,7 +566,7 @@ export interface ImportCompleteRequest {
    * was supplied at presign time and matches the staged key order — prefer
    * files[] for new clients.
    */
-  files?: Array<{ key: string; sha256: string }>;
+  files?: ImportCompleteFile[];
   keys?: string[];
   /**
    * Browser-decoded HEIC/HEIF/AVIF → JPEG conversion artifacts.
@@ -567,6 +591,51 @@ export interface ImportCompleteResponse extends MutationMeta {
   job_id: UUID;
   accepted: ImportCompletePhoto[];
   rejected: Array<{ key: string; reason: string }>;
+}
+
+/**
+ * F4 — owner-picked retention actions (ADR-2.8; per-run, never automatic).
+ * The exact wire contract is documented in CONTRACT.md
+ * § "Storage retention modes (F4 — binding)".
+ */
+export type RetentionMode = 'compress' | 'flagged-only' | 'prune';
+
+export interface StorageCompressRequest {
+  /** Defaults to 'compress' (the pre-F4 shape — POST {} compresses all). */
+  mode?: RetentionMode;
+  /**
+   * Photo subject ids. REQUIRED for 'flagged-only' (the owner-picked set in
+   * the 95% dialog); optional filter for 'compress'. Ignored by 'prune'.
+   */
+  photoIds?: UUID[];
+  /** Legacy alias of photoIds — accepted, but prefer photoIds. */
+  photo_subject_ids?: UUID[];
+  clientOpId?: UUID;
+}
+
+export interface StorageCompressResult {
+  photo_subject_id: UUID;
+  status: 'compressed' | 'skipped:no_savings' | `failed:${string}`;
+  bytes_saved?: number;
+}
+
+/** Response for mode 'compress' | 'flagged-only'. */
+export interface StorageCompressResponse extends MutationMeta {
+  mode: 'compress' | 'flagged-only';
+  results: StorageCompressResult[];
+  processed: number;
+}
+
+/** Response for mode 'prune' — irreversible, no undo. */
+export interface StoragePruneResponse extends MutationMeta {
+  mode: 'prune';
+  irreversible: true;
+  /** Photo subjects permanently deleted. */
+  deleted_photos: number;
+  /** R2 objects deleted (originals + thumbs). */
+  r2_deleted: number;
+  /** Bytes reclaimed (originals + thumbs). */
+  bytes_reclaimed: number;
 }
 
 export interface ImportProcessRequest {
@@ -692,13 +761,6 @@ export interface StorageMeter {
   policy: StoragePolicy;
   breakdown: { originals: number; thumbs: number; exports: number };
   updated_at: string;
-}
-
-export interface CompressRequest {
-  project_id: UUID;
-  /** Compress only these photos; omit = all eligible (keep_original excluded). */
-  photo_ids?: UUID[];
-  clientOpId?: UUID;
 }
 
 export interface HealthResponse {

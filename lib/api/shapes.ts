@@ -190,3 +190,73 @@ export async function emptyTrash(projectId: string): Promise<{ subjects: number;
   });
   return { subjects: ids.length, r2_deleted: keys.length };
 }
+
+/**
+ * F4 prune mode (ADR-2.8): permanently delete PHOTOS already in trash —
+ * directly-trashed photo subjects plus photos under trashed items (their
+ * items stay trashed, photoless). R2 original+thumb objects are deleted
+ * first; then, in one transaction: deleted_photos audit rows,
+ * storage_counters decrements, subject row deletes (trash rows cascade via
+ * ON DELETE CASCADE). Irreversible — no undo. The caller CPU-guards and
+ * CPU-charges the run (the compress route does both around this call).
+ */
+export async function pruneTrashPhotos(projectId: string): Promise<{
+  deleted_photos: number; r2_deleted: number; bytes_reclaimed: number;
+}> {
+  const trashed = await sql()`SELECT t.subject_id FROM trash t
+    JOIN subjects s ON s.id = t.subject_id WHERE s.project_id = ${projectId}`;
+  if (!trashed.length) return { deleted_photos: 0, r2_deleted: 0, bytes_reclaimed: 0 };
+  const ids = trashed.map((r) => r['subject_id'] as string);
+  const storage = await getStorageDriver();
+
+  // Photos under the trashed subjects (direct photo subjects + via trashed
+  // items) — same collection pattern as emptyTrash.
+  const photoRows = await sql()`
+    SELECT DISTINCT p.subject_id, p.r2_key, p.thumb_r2_key, p.size_bytes,
+           p.checksum_sha256
+    FROM photos p JOIN subjects s ON s.id = p.subject_id
+    WHERE s.project_id = ${projectId}
+      AND (p.subject_id = ANY(${ids}) OR p.item_id = ANY(${ids}))`;
+  let bytesOriginals = 0;
+  let bytesThumbs = 0;
+  const keys: string[] = [];
+  const audit: { photo_subject_id: string; r2_key: string; checksum_sha256: string }[] = [];
+  for (const r of photoRows) {
+    const rk = r['r2_key'] as string | null;
+    const tk = r['thumb_r2_key'] as string | null;
+    if (rk) {
+      keys.push(rk);
+      bytesOriginals += Number(r['size_bytes'] ?? 0);
+      audit.push({
+        photo_subject_id: r['subject_id'] as string,
+        r2_key: rk,
+        checksum_sha256: r['checksum_sha256'] as string,
+      });
+    }
+    if (tk && !tk.includes(':')) {
+      keys.push(tk);
+      const h = await storage.head(tk).catch(() => null);
+      bytesThumbs += h?.size ?? 0;
+    }
+  }
+  await storage.deleteMany(keys);
+
+  const photoIds = [...new Set(audit.map((a) => a.photo_subject_id))];
+  await tx((q) => {
+    const queries: TxQuery[] = [
+      bumpCountersQuery(projectId, { originals: -bytesOriginals, thumbs: -bytesThumbs }),
+    ];
+    for (const a of audit) {
+      queries.push(q(
+        `INSERT INTO deleted_photos (photo_subject_id, r2_key, checksum_sha256) VALUES ($1,$2,$3)`,
+        [a.photo_subject_id, a.r2_key, a.checksum_sha256],
+      ));
+    }
+    if (photoIds.length) {
+      queries.push(q(`DELETE FROM subjects WHERE id = ANY($1)`, [photoIds]));
+    }
+    queries.push(bumpRevQuery(projectId));
+    return queries;
+  });
+  return { deleted_photos: photoIds.length, r2_deleted: keys.length, bytes_reclaimed: bytesOriginals + bytesThumbs };
+}

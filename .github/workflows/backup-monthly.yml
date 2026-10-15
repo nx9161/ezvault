@@ -1,11 +1,23 @@
 # SPDX-License-Identifier: MIT
-# Monthly EZVault backup: pg_dump (custom format) + JSON-LD (shared module)
-# into a PRIVATE storage bucket with a 365-day lifecycle.
+# Monthly EZVault backup: pg_dump (custom format) + JSON-LD (shared module),
+# encrypted per B26 crypto-shredding, into a PRIVATE storage bucket with a
+# 365-day lifecycle.
 #
-# B26 crypto-shredding design (comments, not keys): each run writes a NEW
-# object key (backups/<date>/<uuid>.dump / <uuid>.json); nothing is ever
-# overwritten. Deleting the key destroys the only copy of that month's
-# plaintext — bucket lifecycle expires objects after 365 days.
+# B26 crypto-shredding (implemented, F6):
+#   - Each run generates a fresh per-backup DATA_KEY (openssl rand -hex 32).
+#   - The pg dump AND every JSON-LD payload are encrypted with that key:
+#       openssl enc -aes-256-cbc -pbkdf2 -pass env:DATA_KEY
+#   - The data key is wrapped with MASTER_KEY (the GitHub repo secret
+#     MASTER_KEY, mirrored from the Vercel env var of the same name) and
+#     uploaded as key.enc. The plaintext DATA_KEY is unset immediately.
+#   - Plaintext payloads are scrubbed before upload; the bucket only ever
+#     sees dump.enc + jsonld .enc files + key.enc + manifest.json.
+#   - "Delete everything" = destroy MASTER_KEY (Vercel env var + GitHub
+#     secret). Without it the wrapped key cannot be unwrapped, so every
+#     backup ever taken becomes permanently unrecoverable. See
+#     docs/RUNBOOK.md for the manual procedure.
+#   - Nothing is ever overwritten (per-run stamp+uuid filenames) and the
+#     bucket lifecycle expires objects after 365 days.
 #
 # Secrets only via ${{ secrets.* }}. Restores are never run from this job.
 
@@ -53,6 +65,8 @@ jobs:
           pg_dump --format=custom --no-owner --no-privileges \
             --file="$out" "$DATABASE_URL"
           echo "PG_DUMP=$out" >> "$GITHUB_ENV"
+          echo "BACKUP_STAMP=$stamp" >> "$GITHUB_ENV"
+          echo "BACKUP_UUID=$uuid" >> "$GITHUB_ENV"
 
       - name: Verify pg_dump (pg_restore --list + row counts)
         env:
@@ -79,6 +93,69 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: node scripts/backup-jsonld.mjs
 
+      - name: Encrypt backups (B26 crypto-shredding)
+        env:
+          MASTER_KEY: ${{ secrets.MASTER_KEY }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # Per-backup data key: fresh every run, never stored anywhere.
+          DATA_KEY="$(openssl rand -hex 32)"
+          export DATA_KEY
+          encrypt() { openssl enc -aes-256-cbc -pbkdf2 -pass env:DATA_KEY -in "$1" -out "$2"; }
+
+          # Encrypt the pg dump and every JSON-LD payload (incl. its manifest).
+          encrypt "$PG_DUMP" "${PG_DUMP%.dump}.dump.enc"
+          for f in backups/jsonld/*.json; do
+            encrypt "$f" "$f.enc"
+          done
+
+          # Wrap the data key with MASTER_KEY; destroy the plaintext key.
+          keyfile="backups/key-${BACKUP_STAMP}-${BACKUP_UUID}.key.enc"
+          printf '%s' "$DATA_KEY" | openssl enc -aes-256-cbc -pbkdf2 -pass env:MASTER_KEY -out "$keyfile"
+          unset DATA_KEY
+
+          # Scrub ALL plaintext payloads before anything leaves this runner.
+          rm -f "$PG_DUMP" backups/jsonld/*.json
+
+          # Manifest: what was uploaded, how to unwrap/restore.
+          node --input-type=module -e '
+            import { readdir, writeFile } from "node:fs/promises";
+            import { createHash } from "node:crypto";
+            import { readFile } from "node:fs/promises";
+            const files = [];
+            for (const dir of ["backups/pg", "backups/jsonld"]) {
+              for (const f of await readdir(dir)) {
+                if (!f.endsWith(".enc")) continue;
+                const p = dir + "/" + f;
+                const h = createHash("sha256").update(await readFile(p)).digest("hex");
+                files.push({ path: p.replace(/^backups\//, ""), sha256: h });
+              }
+            }
+            const keyfile = "key-" + process.env.BACKUP_STAMP + "-" + process.env.BACKUP_UUID + ".key.enc";
+            const h = createHash("sha256").update(await readFile("backups/" + keyfile)).digest("hex");
+            files.push({ path: keyfile, sha256: h, note: "data key wrapped with MASTER_KEY" });
+            await writeFile("backups/manifest-" + process.env.BACKUP_STAMP + "-" + process.env.BACKUP_UUID + ".json",
+              JSON.stringify({
+                at: new Date().toISOString(),
+                stamp: process.env.BACKUP_STAMP,
+                run_uuid: process.env.BACKUP_UUID,
+                encryption: {
+                  algorithm: "aes-256-cbc", kdf: "pbkdf2",
+                  data_key: "fresh per backup, wrapped with MASTER_KEY — never stored",
+                  crypto_shredding: "destroying MASTER_KEY (Vercel env + GitHub secret) renders every backup unrecoverable",
+                },
+                restore: [
+                  "1. unwrap the data key: openssl enc -d -aes-256-cbc -pbkdf2 -pass env:MASTER_KEY -in key.enc -out /tmp/data.key.txt  (set MASTER_KEY in env first)",
+                  "2. DATA_KEY=$(cat /tmp/data.key.txt); decrypt each payload: openssl enc -d -aes-256-cbc -pbkdf2 -pass env:DATA_KEY -in <file>.enc -out <file>",
+                  "3. pg_restore --format=custom against a scratch database; shred /tmp/data.key.txt after",
+                ],
+                files,
+              }, null, 2));
+            console.log("manifest: " + files.length + " encrypted artifacts");
+          '
+          echo "encrypted artifacts:"; find backups -type f | sort
+
       - name: Upload to private bucket
         env:
           S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
@@ -86,7 +163,8 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
           BACKUP_BUCKET: ${{ secrets.BACKUP_BUCKET }}
         run: |
-          # Private bucket; no public ACLs. Per-run keys (see header comments).
+          # Private bucket; no public ACLs. Only .enc payloads, key.enc, and
+          # the manifest remain at this point (plaintext was scrubbed above).
           aws s3 sync backups/ "s3://$BACKUP_BUCKET/backups/" \
             --endpoint-url "$S3_ENDPOINT" --no-progress --acl private
 

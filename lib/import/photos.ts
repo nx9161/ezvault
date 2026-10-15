@@ -30,6 +30,17 @@ export interface PhotoEntry {
   density?: number | null;
   position?: number;
   templateId?: string | null;
+  /**
+   * F2: list the photo's item into this list, inserted in the SAME
+   * transaction as the photo rows. Must be a project-scoped list id — the
+   * caller validates scope; a NULL/undefined value files nothing.
+   */
+  listId?: string | null;
+  /**
+   * F2: client's folder-relative path, stored as photos.relative_path
+   * (audit only — never rendered, never exported).
+   */
+  relativePath?: string | null;
 }
 
 export interface CreatedPhoto {
@@ -96,13 +107,25 @@ export async function createPhotoRows(
     queries.push(q(
       `INSERT INTO photos (subject_id, item_id, image_id, position, r2_key, thumb_r2_key,
          missing_original, original_filename, mimetype, checksum_sha256, tpy_checksum_md5,
-         size_bytes, width, height, exif, page, density)
-       VALUES ($1,$2,$3,$4,NULL,'pending',true,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14)`,
+         size_bytes, width, height, exif, page, density, relative_path)
+       VALUES ($1,$2,$3,$4,NULL,'pending',true,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15)`,
       [photoId, itemId, imageId, e.position ?? idx,
         e.originalFilename.slice(0, 255), e.mimetype, e.checksumSha256, e.tpyChecksumMd5 ?? null,
         e.sizeBytes ?? 0, e.width ?? 0, e.height ?? 0,
-        JSON.stringify(e.exif ?? {}), e.page ?? 0, e.density ?? null],
+        JSON.stringify(e.exif ?? {}), e.page ?? 0, e.density ?? null,
+        (e.relativePath ?? '').slice(0, 1000) || null],
     ));
+    // F2: file the new item into its folder list in the SAME transaction —
+    // position appended at the end of the list. ON CONFLICT DO NOTHING keeps
+    // a resubmitted /complete idempotent-ish per batch.
+    if (e.listId) {
+      queries.push(q(
+        `INSERT INTO list_items (list_id, item_id, position)
+         VALUES ($1,$2,(SELECT COALESCE(MAX(position)+1,0) FROM list_items WHERE list_id=$1))
+         ON CONFLICT DO NOTHING`,
+        [e.listId, itemId],
+      ));
+    }
     queries.push(q(
       `INSERT INTO tpy_import_map (job_id, tpy_subject_id, new_subject_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
       [jobId, `upload:${e.checksumSha256}`, photoId],

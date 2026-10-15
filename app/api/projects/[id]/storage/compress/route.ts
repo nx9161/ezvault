@@ -1,27 +1,67 @@
 // SPDX-License-Identifier: MIT
-import { handle, ok, parseJson, requireProject, HttpError } from '@/lib/api/route-utils';
+import { handle, ok, parseCappedJson, requireProject, HttpError } from '@/lib/api/route-utils';
 import { sql, tx, bumpRevQuery } from '@/lib/db/index';
 import { getStorageDriver } from '@/lib/storage/driver';
+import { pruneTrashPhotos } from '@/lib/api/shapes';
 import { checkCpuGuard, chargeCpu } from '@/lib/cpu-budget';
 import { randomUUID, createHash } from 'node:crypto';
+import type { StorageCompressRequest } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 type Ctx = { params: Promise<{ id: string }> };
 
+const MODES = ['compress', 'flagged-only', 'prune'] as const;
+type Mode = (typeof MODES)[number];
+
 /**
- * POST /api/projects/[id]/storage/compress — write->verify->swap->delete
- * WebP recompression of originals. `keep_original` photos are excluded.
- * Every photo is CPU-charged; the run aborts 503 when the budget window is
- * spent (B16 / §8). Body: { photo_subject_ids?: string[] }.
+ * POST /api/projects/[id]/storage/compress — owner-picked retention
+ * actions (ADR-2.8; the choice is per-run, never automatic). Body:
+ *   { mode?: 'compress'|'flagged-only'|'prune', photoIds?: string[],
+ *     clientOpId?: string }
+ * `photo_subject_ids` is accepted as a legacy alias of `photoIds`.
+ *
+ * - compress: all eligible originals -> WebP q80 except keep_original=true
+ *   (write->verify->swap->delete). Up to 50 photos per call.
+ * - flagged-only: compress ONLY the photoIds[] the owner picked in the
+ *   95% dialog (400 when photoIds[] is empty).
+ * - prune: permanently delete photos already in trash (R2 object deletes +
+ *   storage_counters decrement + deleted_photos audit rows, all
+ *   in-transaction). Irreversible — no undo.
+ *
+ * Every mode is CPU-guarded (503 when the budget window is spent) and
+ * CPU-charged like the rest of the expensive paths (B16 / §8). The exact
+ * wire contract lives in CONTRACT.md § "Storage retention modes (F4)".
  */
 export const POST = handle(async (req: Request, ctx: Ctx) => {
   await checkCpuGuard();
   const { id } = await ctx.params;
   await requireProject(id);
-  const body = await parseJson<{ photo_subject_ids?: string[] }>(req);
-  const wanted = (body.photo_subject_ids ?? []).filter((s) => typeof s === 'string');
+  const body = await parseCappedJson<StorageCompressRequest>(req);
+  const mode: Mode = body.mode ?? 'compress';
+  if (!MODES.includes(mode)) {
+    throw new HttpError(400, 'validation', "mode must be 'compress'|'flagged-only'|'prune'");
+  }
+  // Legacy alias: the first shipped client sent photo_subject_ids.
+  const photoIds = [
+    ...(body.photoIds ?? []),
+    ...(body.photo_subject_ids ?? []),
+  ].filter((s): s is string => typeof s === 'string' && s.length > 0);
+  const meta = body.clientOpId ? { clientOpId: body.clientOpId } : {};
+
+  if (mode === 'prune') {
+    const cpuStart = process.cpuUsage();
+    const pruned = await pruneTrashPhotos(id);
+    const cpuDelta = process.cpuUsage(cpuStart);
+    await chargeCpu((cpuDelta.user + cpuDelta.system) / 1e6).catch(() => {});
+    return ok({ mode, irreversible: true, ...pruned, ...meta });
+  }
+
+  if (mode === 'flagged-only' && !photoIds.length) {
+    throw new HttpError(400, 'validation', "flagged-only requires a non-empty photoIds[]");
+  }
+  const wanted = [...new Set(photoIds)];
 
   const candidates = wanted.length
     ? await sql()`SELECT p.subject_id, p.r2_key, p.mimetype, p.original_filename
@@ -50,7 +90,7 @@ export const POST = handle(async (req: Request, ctx: Ctx) => {
       const cpuStart = process.cpuUsage();
       const original = await storage.getBytes(oldKey);
       if (!original.length) throw new Error('empty_original');
-      const compressed = await sharp(original).rotate().webp({ quality: 82 }).toBuffer();
+      const compressed = await sharp(original).rotate().webp({ quality: 80 }).toBuffer();
       if (!compressed.length || compressed.length >= original.length) {
         results.push({ photo_subject_id: subjectId, status: 'skipped:no_savings' });
         continue;
@@ -93,5 +133,5 @@ export const POST = handle(async (req: Request, ctx: Ctx) => {
       });
     }
   }
-  return ok({ results, processed: results.length });
+  return ok({ mode, results, processed: results.length, ...meta });
 });

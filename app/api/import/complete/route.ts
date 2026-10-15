@@ -7,7 +7,7 @@ import { isAllowedUploadMimetype, MAX_PHOTO_BYTES, MAGIC_PROBE_BYTES } from '@/l
 import { verifyStagedSha256 } from '@/lib/import/process-photo';
 import { createPhotoRows, type PhotoEntry } from '@/lib/import/photos';
 import { requireRateLimit } from '@/lib/ratelimit';
-import type { ImportCompletePhoto } from '@/lib/types';
+import type { ImportCompletePhoto, ImportCompleteFile } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -23,12 +23,16 @@ export const maxDuration = 300;
  *      on mismatch; constant-memory streaming).
  *   4. Dual-checksum dedupe (sha256, then .tpy md5 if present; policy
  *      skip/keep_both/ask) -> one subject item + photo + images rows each.
+ *   5. Filing (F2): per-file listId (or relativePath resolved against the
+ *      folder job's dir_lists) inserts list_items in the SAME transaction;
+ *      relativePath is stored as photos.relative_path (audit). A list_id
+ *      outside the project rejects the file (422:list_not_found).
  */
 export const POST = handle(async (req: Request) => {
   await requireRateLimit('import:complete');
   const body = await parseCappedJson<{
     job_id?: string; project_id?: string;
-    files?: { key?: string; sha256?: string; filename?: string }[]; keys?: string[];
+    files?: ImportCompleteFile[]; keys?: string[];
     conversions?: { key?: string; conversion_of?: string }[];
     exif?: Record<string, Record<string, unknown>>;
     duplicate_policy?: 'skip' | 'keep_both' | 'ask';
@@ -38,17 +42,22 @@ export const POST = handle(async (req: Request) => {
   if (!body.job_id) throw new HttpError(400, 'validation', 'job_id is required');
   if (!body.project_id) throw new HttpError(400, 'validation', 'project_id is required');
   await requireProject(body.project_id);
-  const jobRows = await sql()`SELECT id, project_id, kind FROM import_jobs
+  const jobRows = await sql()`SELECT id, project_id, kind, checkpoint FROM import_jobs
     WHERE id = ${body.job_id} AND project_id = ${body.project_id}`;
   if (!jobRows.length) throw new HttpError(404, 'not_found', 'import job not found');
   const kind = jobRows[0]['kind'] as string;
   if (kind !== 'upload' && kind !== 'folder') {
     throw new HttpError(400, 'validation', 'job is not an upload job');
   }
+  // F2: dir → list_id mapping minted by POST /api/import/folder-session,
+  // used to resolve per-file relative paths when the client sends no
+  // explicit listId.
+  const dirLists = ((jobRows[0]['checkpoint'] ?? {}) as { dir_lists?: Record<string, string> })
+    .dir_lists ?? {};
 
-  const files = body.files?.length
+  const files: ImportCompleteFile[] = body.files?.length
     ? body.files
-    : (body.keys ?? []).map((key) => ({ key, sha256: '', filename: key.split('/').pop() }));
+    : (body.keys ?? []).map((key): ImportCompleteFile => ({ key, sha256: '', filename: key.split('/').pop() }));
   if (!files.length) throw new HttpError(400, 'validation', 'files[] (or keys[]) is required');
 
   const jobPrefix = `uploads/${body.job_id}/`;
@@ -62,6 +71,12 @@ export const POST = handle(async (req: Request) => {
       conversions[c.conversion_of] = c.key;
     }
   }
+
+  // F2: per-file filing inputs, aligned with files[] by index (acceptedKeys
+  // maps staged key -> entries index).
+  const normPath = (p: string) => p.replace(/\\/g, '/').replace(/^\/+/, '').slice(0, 1000);
+  const fileLists: (string | null)[] = [];
+  const fileRelPaths: (string | null)[] = [];
 
   const entries: PhotoEntry[] = [];
   const acceptedKeys: string[] = [];
@@ -118,21 +133,58 @@ export const POST = handle(async (req: Request) => {
       mimetype: detected,
       checksumSha256: claimed,
       exif: body.exif?.[key],
+      relativePath: f.relativePath ?? f.relative_path ?? null,
     });
     acceptedKeys.push(key);
+    // F2: explicit listId wins; otherwise resolve the relative path against
+    // the folder job's dir_lists (server-minted by folder-session).
+    let listId = f.listId ?? f.list_id ?? null;
+    const relPath = f.relativePath ?? f.relative_path ?? null;
+    const normRel = relPath ? normPath(relPath) : null;
+    fileRelPaths.push(normRel);
+    if (!listId && kind === 'folder' && normRel) {
+      const dir = normRel.split('/').slice(0, -1).join('/');
+      listId = (dir && typeof dirLists[dir] === 'string') ? dirLists[dir] : null;
+    }
+    fileLists.push(listId ? String(listId) : null);
   }
 
+  // F2: project-scope the filing targets. A list_id outside this project is
+  // a client bug — reject the file rather than misfiling it.
+  const wantedLists = [...new Set(fileLists.filter((l): l is string => !!l))];
+  const validLists = new Set<string>();
+  if (wantedLists.length) {
+    const rows = await sql()`SELECT id FROM lists
+      WHERE id = ANY(${wantedLists}) AND project_id = ${body.project_id}`;
+    for (const r of rows) validLists.add(r['id'] as string);
+  }
+  const badIdx: number[] = [];
+  for (let i = 0; i < fileLists.length; i++) {
+    const l = fileLists[i];
+    if (l && !validLists.has(l)) {
+      rejected.push({ key: acceptedKeys[i], reason: '422:list_not_found' });
+      badIdx.push(i);
+    }
+  }
+  const goodIdx = entries.map((_, i) => i).filter((i) => !badIdx.includes(i));
+  const goodEntries = goodIdx.map((i) => ({
+    ...entries[i],
+    listId: fileLists[i],
+    relativePath: fileRelPaths[i] ?? entries[i].relativePath,
+  }));
+
   // Dual-checksum dedupe + one item/photo/images rows each (compound txn).
-  const created = await createPhotoRows(body.project_id, body.job_id, entries, { duplicatePolicy: policy });
+  // created[] is aligned with goodEntries, not with files[].
+  const created = await createPhotoRows(body.project_id, body.job_id, goodEntries, { duplicatePolicy: policy });
 
   const accepted: ImportCompletePhoto[] = [];
-  for (let i = 0; i < acceptedKeys.length; i++) {
+  for (let i = 0; i < goodEntries.length; i++) {
     const c = created[i];
     if (c.dedupe === 'skipped_duplicate') {
-      rejected.push({ key: acceptedKeys[i], reason: 'duplicate_skipped' });
+      rejected.push({ key: acceptedKeys[goodIdx[i]], reason: 'duplicate_skipped' });
     } else {
       accepted.push({
-        key: acceptedKeys[i],
+        key: acceptedKeys[goodIdx[i]],
         photo_subject_id: c.subjectId,
         item_id: c.itemId,
         dedupe: c.dedupe,

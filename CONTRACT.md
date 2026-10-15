@@ -50,6 +50,83 @@ builder via the coordinator.
   re-escape it. No client-side sentinel handling; the sentinels never appear
   in the wire payload.
 
+## Import /complete — per-file filing (F2 — binding)
+
+- `POST /api/import/complete` accepts per-file `listId` (snake_case alias
+  `list_id` also accepted) — the `list_id` carried on each grant returned by
+  `POST /api/import/folder-session`.
+- When a file has no explicit `listId` but the job is a folder job and the
+  file carries `relativePath` (`relative_path` alias accepted), the server
+  resolves the parent directory against the job checkpoint's `dir_lists`
+  (server-minted by folder-session) as a fallback.
+- Every `listId` is project-scoped before use: a `list_id` outside the
+  project rejects that file with `422:list_not_found` — never silently
+  misfiled.
+- Filing inserts `list_items` rows in the SAME transaction as the photo
+  commit (`createPhotoRows`, `lib/import/photos.ts`); positions append at
+  the end of the target list.
+- `relativePath` is stored as `photos.relative_path` (migration
+  `db/migrations/0003_relative_path.sql`) — **audit only**: never
+  read-rendered, never emitted in any export payload.
+- Type: `ImportCompleteFile` in `lib/types.ts`.
+
+## Storage retention modes (F4 — binding, ADR-2.8)
+
+`POST /api/projects/[id]/storage/compress` — the owner picks one mode per
+run; nothing is ever automatic.
+
+Request:
+```json
+{
+  "mode": "compress",
+  "photoIds": ["<photo-subject-id>", "..."],
+  "clientOpId": "<uuid>"
+}
+```
+- `mode` — `'compress'` (default when omitted — the pre-F4 `POST {}`
+  shape) | `'flagged-only'` | `'prune'`.
+- `photoIds` — REQUIRED for `flagged-only` (the owner-picked set from the
+  95% dialog; 400 when empty); optional filter for `compress`; ignored by
+  `prune`. Legacy alias `photo_subject_ids` is accepted — prefer `photoIds`.
+- Modes:
+  - `compress` — all eligible originals (`keep_original=false`, present,
+    non-WebP) → WebP q80 via write→verify→swap→delete; up to 50 per call.
+  - `flagged-only` — compress ONLY `photoIds[]` (same 50/call cap).
+  - `prune` — permanently delete photos already in trash: directly-trashed
+    photo subjects plus photos under trashed items (their items stay
+    trashed, photoless). R2 original+thumb objects are deleted first; then
+    in-transaction: `deleted_photos` audit rows, `storage_counters`
+    decrements, subject row deletes (trash rows cascade). Irreversible — no
+    undo.
+- Every mode is CPU-guarded (503 when the budget window is spent, B16) and
+  CPU-charged; `parseCappedJson` depth/key caps apply to the body (B11).
+
+Response (`compress` / `flagged-only`):
+```json
+{
+  "mode": "compress",
+  "results": [
+    { "photo_subject_id": "<uuid>", "status": "compressed", "bytes_saved": 12345 },
+    { "photo_subject_id": "<uuid>", "status": "skipped:no_savings" },
+    { "photo_subject_id": "<uuid>", "status": "failed:empty_original" }
+  ],
+  "processed": 3
+}
+```
+Response (`prune`):
+```json
+{
+  "mode": "prune",
+  "irreversible": true,
+  "deleted_photos": 12,
+  "r2_deleted": 24,
+  "bytes_reclaimed": 98765432
+}
+```
+Types: `StorageCompressRequest`, `StorageCompressResponse`,
+`StoragePruneResponse` in `lib/types.ts`; prune implementation
+`pruneTrashPhotos()` in `lib/api/shapes.ts`.
+
 ## Binding rules (from the War Room — non-negotiable)
 
 - Clean-room: ZERO Tropy code, icons, copy, or artwork. All UI copy is original.

@@ -63,6 +63,89 @@ Environment (never committed — see `.env.example`):
 - `DATABASE_URL` — Neon Postgres connection string
 - `R2_*` — Cloudflare R2 S3-compatible credentials
 - `CRON_SECRET` — secret for the nightly maintenance cron
+- `MASTER_KEY` — wraps the per-backup data keys for the monthly backup
+  workflow (mirrors the Vercel env var of the same name; see below)
+
+## Deploy runbook
+
+Single-user, zero-cost deploy. Do these in order; the smoke test at the
+end fails the pipeline if protection is misconfigured (B7).
+
+### 1. Vercel project settings
+
+- **Deployment Protection:** Project → Settings → Deployment Protection →
+  **Standard Protection** on **All Deployments**. This is the single-user
+  gate — the app must never be reachable without the Vercel login.
+- Verify `maxDuration: 300` is honored on the plan (ADR-2.24): import,
+  export, `.tpy` runs, and retention routes all declare it.
+
+### 2. Environment variables (all set before the first deploy)
+
+| Variable | Source | Notes |
+|---|---|---|
+| `DATABASE_URL` | Neon dashboard | HTTP driver connection string |
+| `R2_ACCOUNT_ID` | Cloudflare dashboard | also feeds the CSP `img-src`/`connect-src` wildcard (F1) |
+| `R2_ACCESS_KEY_ID` | Cloudflare dashboard | R2 API token |
+| `R2_SECRET_ACCESS_KEY` | Cloudflare dashboard | R2 API token |
+| `R2_BUCKET_DATA` | your choice | default `ezvault-data` |
+| `R2_BUCKET_BACKUPS` | your choice | monthly-backup target bucket |
+| `CRON_SECRET` | `openssl rand -base64 32` | guards `/api/cron/nightly` |
+| `MASTER_KEY` | `openssl rand -hex 32` | **mirror the same value** into the GitHub repo secret `MASTER_KEY` for the backup workflow; it wraps each month's backup data key (B26 crypto-shredding) |
+
+> ⚠️ **Deploying without the R2 vars silently uses the ephemeral local
+> filesystem driver** (`lib/storage/driver.ts`). Uploads land on the
+> deployment's disk and are **lost on the next redeploy**. R2-less deploys
+> are staging/QA only — never production data.
+
+### 3. Apply database migrations (in filename order)
+
+```bash
+for f in db/migrations/*.sql; do psql "$DATABASE_URL" -f "$f"; done
+```
+
+### 4. Post-deploy smoke test (unauthenticated)
+
+```bash
+# Must NOT return 200 app HTML — expect a redirect to the Vercel login.
+curl -sI https://<your-app>.vercel.app | head -1
+# Pre-env, /api/health must answer 503 with the not-configured message
+# (no stack leak); post-env it answers 200.
+curl -s https://<your-app>.vercel.app/api/health
+```
+
+If the first command returns `200` with app HTML, Deployment Protection is
+off — fix it in the dashboard (step 1) and redeploy.
+
+### 5. Backup verification access
+
+Vercel Authentication also gates the app's API surface, so anything that
+verifies live backups against the running app (restore spot-checks,
+`scripts/backup-jsonld.mjs` runs) must send the
+`x-vercel-protection-bypass` header (value: Project → Settings →
+Deployment Protection → protection bypass secret) — or use the
+`CRON_SECRET`-gated export route instead. The scheduled
+`backup-monthly` workflow itself is unaffected (it talks to Neon and the
+bucket directly), but it needs the GitHub secrets `DATABASE_URL`,
+`MASTER_KEY`, `BACKUP_S3_ENDPOINT`, `BACKUP_S3_ACCESS_KEY_ID`,
+`BACKUP_S3_SECRET_ACCESS_KEY`, and `BACKUP_BUCKET`.
+
+## Privacy
+
+- **Where your data lives:** photo bytes in your private Cloudflare R2
+  bucket; metadata (items, notes, tags, lists) in your Neon Postgres
+  database. Nothing is sent to any third party — there is no analytics,
+  no telemetry, no external API call in any user path.
+- **Backups:** the monthly `backup-monthly` workflow writes an encrypted
+  database dump + JSON-LD export to your private backup bucket. Backups
+  are retained for **365 days** (bucket lifecycle), then expire
+  automatically. Each backup is encrypted with a fresh per-backup data
+  key; the data key is wrapped with `MASTER_KEY`. Destroying `MASTER_KEY`
+  (Vercel env + GitHub secret) renders every backup permanently
+  unrecoverable — that is the "delete everything" path; see
+  `docs/RUNBOOK.md`.
+- **Deletion:** trash restore is available until you empty the trash.
+  Emptying the trash and the prune retention mode are irreversible
+  (R2 objects deleted, audit rows kept in `deleted_photos` only).
 
 ## License
 
