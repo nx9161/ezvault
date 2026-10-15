@@ -7,6 +7,7 @@ import { isAllowedUploadMimetype, MAX_PHOTO_BYTES, MAGIC_PROBE_BYTES } from '@/l
 import { verifyStagedSha256 } from '@/lib/import/process-photo';
 import { createPhotoRows, type PhotoEntry } from '@/lib/import/photos';
 import { requireRateLimit } from '@/lib/ratelimit';
+import { resolveItemTitles } from '@/lib/api/item-enrichment';
 import type { ImportCompletePhoto, ImportCompleteFile } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -80,7 +81,16 @@ export const POST = handle(async (req: Request) => {
 
   const entries: PhotoEntry[] = [];
   const acceptedKeys: string[] = [];
-  const rejected: { key: string; reason: string }[] = [];
+  // F-I: rejected entries carry duplicate context so the UI can show
+  // "already in: {title}". Only duplicate rejections have an existing
+  // subject; the rest leave the optional fields unset.
+  interface RejectedEntry {
+    key: string;
+    reason: string;
+    existing_subject_id?: string | null;
+    title?: string | null;
+  }
+  const rejected: RejectedEntry[] = [];
 
   for (const f of files) {
     const key = f.key ?? '';
@@ -181,10 +191,32 @@ export const POST = handle(async (req: Request) => {
   const created = await createPhotoRows(body.project_id, body.job_id, goodEntries, { duplicatePolicy: policy });
 
   const accepted: ImportCompletePhoto[] = [];
+  // F-I: one batched title lookup for every duplicate rejection —
+  // c.subjectId is the EXISTING photo's subject; the title comes from
+  // the parent item's template title field.
+  const dupPhotoIds = goodEntries
+    .map((_, i) => created[i])
+    .filter((c) => c.dedupe === 'skipped_duplicate')
+    .map((c) => c.subjectId);
+  const photoItem = new Map<string, string>();
+  const itemTitles = new Map<string, string | null>();
+  if (dupPhotoIds.length) {
+    const pi = await sql()`SELECT subject_id, item_id FROM photos
+      WHERE subject_id = ANY(${dupPhotoIds})`;
+    for (const r of pi) photoItem.set(r['subject_id'] as string, r['item_id'] as string);
+    const titles = await resolveItemTitles([...new Set(photoItem.values())]);
+    for (const [k, v] of titles) itemTitles.set(k, v);
+  }
   for (let i = 0; i < goodEntries.length; i++) {
     const c = created[i];
     if (c.dedupe === 'skipped_duplicate') {
-      rejected.push({ key: acceptedKeys[goodIdx[i]], reason: 'duplicate_skipped' });
+      const parentItem = photoItem.get(c.subjectId);
+      rejected.push({
+        key: acceptedKeys[goodIdx[i]],
+        reason: 'duplicate_skipped',
+        existing_subject_id: c.subjectId,
+        title: (parentItem ? itemTitles.get(parentItem) : null) ?? null,
+      });
     } else {
       accepted.push({
         key: acceptedKeys[goodIdx[i]],
