@@ -13,6 +13,7 @@ import { patch, del } from "@/lib/api/client";
 import { mutate } from "swr";
 import { useRouter } from "next/navigation";
 import { Dialog, ConfirmDialog } from "@/components/ui/Dialog";
+import { DeleteEverythingDialog } from "@/components/settings/DeleteEverythingDialog";
 import { ErrorCard } from "@/components/ui/Feedback";
 
 export default function SettingsDialog({ projectId }: { projectId: string }) {
@@ -32,6 +33,7 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
   const [duplicatePolicy, setDuplicatePolicy] = useState("skip");
   const [notesFormat, setNotesFormat] = useState("html");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteEverythingOpen, setDeleteEverythingOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -152,6 +154,16 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
               {ts("takeTour")}
             </button>
           </div>
+          <div className="ez-field">
+            <span className="ez-field-label">{t("dangerZone")}</span>
+            <button
+              type="button"
+              className="ez-btn ez-btn--danger ez-btn--sm"
+              onClick={() => setDeleteEverythingOpen(true)}
+            >
+              {t("deleteEverything")}
+            </button>
+          </div>
         </>
       )}
       {confirmDelete ? (
@@ -169,6 +181,9 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
             router.push("/");
           }}
         />
+      ) : null}
+      {deleteEverythingOpen ? (
+        <DeleteEverythingDialog onClose={() => setDeleteEverythingOpen(false)} />
       ) : null}
     </Dialog>
   );
