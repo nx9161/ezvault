@@ -215,3 +215,44 @@ oneToOne/panHint`, `shortcuts.actualPixels/fitWindow/pan`) are deleted;
 plugin: `maxZoomPixelRatio: 4`, `keyboardMoveDistance: 48`); selection
 drawing + edit sliders re-verified untouched on the edit surface (`tsc`
 clean, `npm test` green, `next build` green).
+
+---
+
+## 5. @playwright/test@1.64.1 — E2E harness (Wave 2, dev-only)
+
+**Status:** ACCEPTED · landed 2026-10-15 · commit `<fill>`
+
+**What it is:** Microsoft's end-to-end test runner (Chromium/Firefox/WebKit).
+
+**Verification (re-pulled 2026-10-15):**
+
+- **License (exact, read from `node_modules/@playwright/test/LICENSE`):**
+  `Apache License, Version 2.0, January 2004`
+- **License gate:** `node scripts/check-licences.mjs` PASS — no GPL/AGPL/SSPL;
+  only the four pre-existing LGPL warnings (unchanged from baseline)
+- **OSV.dev:** `api.osv.dev/v1/query` for `@playwright/test@1.64.1` → **zero**
+  vulnerabilities
+- **postinstall scripts:** none (`package.json` `scripts` is `{}`) — browsers
+  are NOT installed by postinstall; CI runs
+  `npx playwright install --with-deps chromium` deliberately (documented in
+  `e2e/README.md`)
+- **Telemetry/phone-home:** none in the test runner path — no network calls
+  at import; browser download happens only on explicit `playwright install`
+- **Install:** `npm i -D --save-exact @playwright/test@1.64.1` (devDependency)
+
+**Bundle delta:** **0 KB** — devDependency, never bundled. No ADR needed.
+
+**Gap closed:** `e2e/` + `playwright.config.ts` (Chromium only — single
+browser keeps CI at $0): `auth-gate.spec.ts` (root 302, `/api/health` 503
+pre-env — the 503 assertion runs locally, green), `rate-limit.spec.ts`
+(40-burst → 429s with `Retry-After`, zero 500s — hardening H2),
+`tpy-wizard.spec.ts` (Standard fixture 3 items / 4 photos + idempotent
+re-run; Advanced fixture 3 missing originals re-linked, nothing left
+missing), `backup-restore.spec.ts` (JSON-LD export → scratch-project
+import, counts match — H7 adjacency). Committed synthetic fixtures in
+`e2e/fixtures/` (`standard.tpy`, `standard-assets.zip`, `advanced.tpy`,
+`advanced-originals/`), built by `e2e/fixtures/build-fixtures.mjs`
+(repo `sql.js` + `sharp`, dev-time only). Anything needing live Neon/R2/
+Vercel `test.skip`s with reason `OWNER-BLOCKED: live infra` — NOT faked.
+Protected-preview runs use the `x-vercel-protection-bypass` header pattern;
+Deployment Protection is never disabled for tests.
