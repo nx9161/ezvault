@@ -201,7 +201,9 @@ export async function processPhoto(input: ProcessPhotoInput): Promise<ProcessedP
   const thumbSize = thumbBytes.length;
 
   // ONE transaction: finalize photo + counters (FOR UPDATE, lock order
-  // counters -> photos -> jobs) + cpu_seconds + rev bump.
+  // counters -> photos -> jobs) + done+1 + rev bump. cpu_seconds is charged
+  // exactly once, post-commit, via chargeCpu() below (it updates both the
+  // rolling window and the job row) — never in-txn AND post-commit.
   const cpuDelta = process.cpuUsage(cpuStart);
   const cpuSeconds = (cpuDelta.user + cpuDelta.system) / 1e6;
 
@@ -215,8 +217,8 @@ export async function processPhoto(input: ProcessPhotoInput): Promise<ProcessedP
     ),
     q(`UPDATE images SET width = $2, height = $3 WHERE id = (SELECT image_id FROM photos WHERE subject_id = $1)`,
       [photoSubjectId, width, height]),
-    q(`UPDATE import_jobs SET done = done + 1, cpu_seconds = cpu_seconds + $2, updated_at = now() WHERE id = $1`,
-      [jobId, cpuSeconds]),
+    q(`UPDATE import_jobs SET done = done + 1, updated_at = now() WHERE id = $1`,
+      [jobId]),
     bumpRevQuery(projectId),
   ]);
 

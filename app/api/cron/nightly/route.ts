@@ -15,11 +15,15 @@ export const maxDuration = 300;
  *   2. counter reconciliation — drift >1% vs the DB byte sums logs an
  *      alert; NEVER auto-corrects (ADR-2.7),
  *   3. queue tick — 'running' jobs idle >24h are marked failed,
- *   4. export expiry — exports/ staging objects older than 7 days deleted.
+ *   4. export expiry — exports/ staging objects older than 7 days deleted,
+ *   5. CPU window roll + resume paused_cpu jobs into queued once a fresh,
+ *      unpaused window exists.
  */
 export const GET = handle(async (req: Request) => {
   const secret = process.env['CRON_SECRET'];
-  if (!secret) return apiError('server_error', 'CRON_SECRET is not configured', 500);
+  // F-B3: generic message — never reveal whether the secret is configured
+  // to unauthenticated callers.
+  if (!secret) return apiError('server_error', 'service unavailable', 500);
   const auth = req.headers.get('authorization') ?? '';
   const provided = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   // B20: constant-time compare over digests (length-safe).
@@ -94,6 +98,20 @@ export const GET = handle(async (req: Request) => {
     }
   }
   report['exports_deleted'] = exportsDeleted;
+
+  // 5. CPU window roll + resume. currentWindow() rolls the 30-day window
+  // lazily when expired; jobs parked in paused_cpu by the guard resume only
+  // once a fresh, unpaused window exists (arch §10 — previously unbuilt).
+  const { currentWindow } = await import('@/lib/cpu-budget');
+  const w = await currentWindow();
+  if (!w.paused) {
+    const resumed = await sql()`UPDATE import_jobs
+      SET status = 'queued', updated_at = now()
+      WHERE status = 'paused_cpu' RETURNING id`;
+    report['cpu_resumed'] = resumed.length;
+  } else {
+    report['cpu_resumed'] = 0;
+  }
 
   return ok({ ok: true, at: new Date().toISOString(), ...report });
 });

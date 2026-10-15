@@ -142,8 +142,15 @@ export async function createPhotoRows(
   }
 
   if (createdIds.length) {
+    // CR-1: APPEND to checkpoint.subject_ids — the ask two-phase calls
+    // /complete twice per job, and jsonb || would REPLACE the first batch,
+    // corrupting compound undo. Array concat preserves both batches.
     await sql()`UPDATE import_jobs
-      SET checkpoint = COALESCE(checkpoint,'{}'::jsonb) || ${JSON.stringify({ subject_ids: createdIds })}::jsonb,
+      SET checkpoint = jsonb_set(
+            COALESCE(checkpoint,'{}'::jsonb),
+            '{subject_ids}',
+            COALESCE(checkpoint->'subject_ids','[]'::jsonb) || ${JSON.stringify(createdIds)}::jsonb
+          ),
           updated_at = now()
       WHERE id = ${jobId}`;
   }
@@ -192,8 +199,10 @@ export async function undoJob(jobId: string, projectId: string): Promise<number>
       bytesThumbs += h?.size ?? 0;
     }
   }
-  await storage.deleteMany(keys);
-
+  // CR-3: DB transaction FIRST, R2 deletes after commit. If the txn fails,
+  // the rows (and their key references) survive — retryable. If an R2 delete
+  // fails after commit, bytes leak (counters already decremented) — the
+  // lesser evil vs ghost rows pointing at deleted bytes on an IRREVERSIBLE op.
   await tx((q) => [
     bumpCountersQuery(projectId, {
       originals: -bytesOriginals,
@@ -203,5 +212,10 @@ export async function undoJob(jobId: string, projectId: string): Promise<number>
     q(`UPDATE import_jobs SET status = 'cancelled', updated_at = now() WHERE id = $1`, [jobId]),
     bumpRevQuery(projectId),
   ]);
+  await storage.deleteMany(keys).catch((err) => {
+    // Post-commit R2 failure: bytes leak (counters already decremented).
+    // Loud, not silent — the nightly cron's drift alert is the backstop.
+    console.error('undoJob: R2 deleteMany failed after DB commit:', err);
+  });
   return subjectIds.length;
 }

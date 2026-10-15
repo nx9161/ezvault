@@ -572,6 +572,29 @@ export async function runTpyImport(
     conflicts.push({ tpy_id: tpyId, kind: 'photo', reason: 'duplicate_skipped', detail: via });
   };
 
+  // CR-5: resume the asset phase for photos mapped by an earlier /run whose
+  // assets never landed (crash between the chunk commit — which writes the
+  // idempotency map — and the per-photo asset upload). Marker:
+  // thumb_r2_key still 'tpy:pending' with r2_key NULL. Placeholders and
+  // successes both move the thumb marker, so only truly-assetless rows
+  // match; remapped duplicates point at pre-existing photos (r2_key set).
+  const assetlessRows = await sql()`
+    SELECT tim.tpy_subject_id AS tpy_id, tim.new_subject_id AS new_id
+    FROM tpy_import_map tim
+    JOIN photos p ON p.subject_id = tim.new_subject_id
+    WHERE tim.job_id = ${jobId}
+      AND tim.tpy_subject_id NOT LIKE 'list:%'
+      AND tim.tpy_subject_id NOT LIKE 'upload:%'
+      AND p.r2_key IS NULL AND p.thumb_r2_key = 'tpy:pending'`;
+  if (assetlessRows.length) {
+    const byTpyId = new Map(subjects.map((s) => [s.tpy_id, s]));
+    for (const r of assetlessRows) {
+      const s = byTpyId.get(Number(r['tpy_id']));
+      if (!s || s.kind !== 'photo') continue;
+      await importTpyPhotoAsset(jobId, projectId, s, r['new_id'] as string, opts, conflicts, imported, newIds, remapDuplicate);
+    }
+  }
+
   for (let c = 0; c < batch.length; c += CHUNK_SUBJECTS) {
     const chunk = batch.slice(c, c + CHUNK_SUBJECTS);
     const queries: TxQuery[] = [];
@@ -750,12 +773,21 @@ async function importTpyLists(
 ): Promise<void> {
   const sidecar = await readListsSidecar(jobId);
   if (!sidecar.lists.length) return;
+  // CR-4 idempotency: imported lists are recorded in tpy_import_map under
+  // `list:<tpy_id>` — a resumed or repeated /run reuses the UUIDs instead
+  // of duplicating the whole tree with fresh randomUUIDs.
   const listIdMap = new Map<number, string>();
+  const mappedLists = await sql()`SELECT tpy_subject_id, new_subject_id FROM tpy_import_map
+    WHERE job_id = ${jobId} AND tpy_subject_id LIKE 'list:%'`;
+  for (const r of mappedLists) {
+    listIdMap.set(Number((r['tpy_subject_id'] as string).slice(5)), r['new_subject_id'] as string);
+  }
   // Parents before children (iterative depth resolution).
   const remaining = [...sidecar.lists];
   let guard = remaining.length + 1;
   while (remaining.length && guard-- > 0) {
     const li = remaining.shift()!;
+    if (listIdMap.has(li.tpy_id)) continue; // already imported by an earlier /run
     if (li.parent_tpy_id != null && !listIdMap.has(li.parent_tpy_id)) {
       remaining.push(li);
       continue;
@@ -765,6 +797,8 @@ async function importTpyLists(
     try {
       await sql()`INSERT INTO lists (id, project_id, name, parent_list_id, position)
         VALUES (${id}, ${projectId}, ${li.name}, ${parentId}, ${li.position})`;
+      await sql()`INSERT INTO tpy_import_map (job_id, tpy_subject_id, new_subject_id)
+        VALUES (${jobId}, ${'list:' + li.tpy_id}, ${id}) ON CONFLICT DO NOTHING`;
       listIdMap.set(li.tpy_id, id);
       imported.lists++;
     } catch (err) {

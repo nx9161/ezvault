@@ -11,7 +11,12 @@ type Ctx = { params: Promise<{ id: string }> };
 
 /**
  * GET /api/projects/[id]/search?q=&scope=
- * FTS over metadata+notes+tags (trigger-maintained search_documents).
+ * FTS over metadata+notes+tags. Vectors are computed per request (scope-
+ * selectable: metadata/notes/tags/all) — the trigger-maintained
+ * search_documents table is NOT the read path yet (deferred: per-scope
+ * tsvector columns + doctext; see audit). Per-keystroke cost is 3
+ * project-wide GROUP BY aggregations + per-row to_tsvector — acceptable
+ * for a single user, revisit if the corpus grows past ~10k subjects.
  * `websearch_to_tsquery` english+simple, AND default, "phrase" supported,
  * ranked by ts_rank_cd, snippets via ts_headline.
  *

@@ -172,8 +172,9 @@ export async function emptyTrash(projectId: string): Promise<{ subjects: number;
       bytesThumbs += h?.size ?? 0;
     }
   }
-  await storage.deleteMany(keys);
-
+  // CR-3: DB transaction FIRST, R2 deletes after commit (see undoJob in
+  // lib/import/photos.ts for the rationale — ghost rows on irreversible ops
+  // are worse than leaked bytes).
   await tx((q) => {
     const queries: TxQuery[] = [
       bumpCountersQuery(projectId, { originals: -bytesOriginals, thumbs: -bytesThumbs }),
@@ -187,6 +188,9 @@ export async function emptyTrash(projectId: string): Promise<{ subjects: number;
     queries.push(q(`DELETE FROM subjects WHERE id = ANY($1)`, [ids]));
     queries.push(bumpRevQuery(projectId));
     return queries;
+  });
+  await storage.deleteMany(keys).catch((err) => {
+    console.error('emptyTrash: R2 deleteMany failed after DB commit:', err);
   });
   return { subjects: ids.length, r2_deleted: keys.length };
 }
@@ -239,9 +243,9 @@ export async function pruneTrashPhotos(projectId: string): Promise<{
       bytesThumbs += h?.size ?? 0;
     }
   }
-  await storage.deleteMany(keys);
-
   const photoIds = [...new Set(audit.map((a) => a.photo_subject_id))];
+  // CR-3: DB transaction FIRST, R2 deletes after commit (same rationale as
+  // emptyTrash above).
   await tx((q) => {
     const queries: TxQuery[] = [
       bumpCountersQuery(projectId, { originals: -bytesOriginals, thumbs: -bytesThumbs }),
@@ -257,6 +261,9 @@ export async function pruneTrashPhotos(projectId: string): Promise<{
     }
     queries.push(bumpRevQuery(projectId));
     return queries;
+  });
+  await storage.deleteMany(keys).catch((err) => {
+    console.error('pruneTrashPhotos: R2 deleteMany failed after DB commit:', err);
   });
   return { deleted_photos: photoIds.length, r2_deleted: keys.length, bytes_reclaimed: bytesOriginals + bytesThumbs };
 }

@@ -135,6 +135,9 @@ bucket directly), but it needs the GitHub secrets `DATABASE_URL`,
   bucket; metadata (items, notes, tags, lists) in your Neon Postgres
   database. Nothing is sent to any third party — there is no analytics,
   no telemetry, no external API call in any user path.
+- **Nightly cron:** if you schedule `/api/cron/nightly` (Vercel Cron or any
+  scheduler), it must send `Authorization: Bearer $CRON_SECRET` — the route
+  rejects everything else with 401.
 - **Backups:** the monthly `backup-monthly` workflow writes an encrypted
   database dump + JSON-LD export to your private backup bucket. Backups
   are retained for **365 days** (bucket lifecycle), then expire

@@ -2,7 +2,7 @@
 import { handle, ok, parseCappedJson, requireProject, HttpError } from '@/lib/api/route-utils';
 import { sql } from '@/lib/db/index';
 import { getStorageDriver } from '@/lib/storage/driver';
-import { magicMatchesMimetype, detectFromBytes } from '@/lib/import/magic';
+import { magicMatchesMimetype, detectFromBytes, mimetypeForFormat } from '@/lib/import/magic';
 import { isAllowedUploadMimetype, MAX_PHOTO_BYTES, MAGIC_PROBE_BYTES } from '@/lib/import/validation';
 import { verifyStagedSha256 } from '@/lib/import/process-photo';
 import { createPhotoRows, type PhotoEntry } from '@/lib/import/photos';
@@ -109,11 +109,12 @@ export const POST = handle(async (req: Request) => {
       continue;
     }
     // B1: magic-byte verify against the allowlist — the signature that
-    // governs is the BYTES, not the metadata.
+    // governs is the BYTES, not the metadata. The claimed Content-Type
+    // (already allowlisted above) must match what the bytes decode as.
     const probe = await storage.getRange(key, 0, Math.min(MAGIC_PROBE_BYTES, head.size) - 1);
     const detected = detectFromBytes(probe);
-    if (!detected || !magicMatchesMimetype(detected, probe) || !isAllowedUploadMimetype(detected)) {
-      await reject('magic_mismatch: bytes do not match an allowlisted image format', 422, true);
+    if (!detected || !magicMatchesMimetype(head.contentType, probe)) {
+      await reject('magic_mismatch: bytes do not match the claimed Content-Type', 422, true);
       continue;
     }
     // B18: streaming full-file SHA-256 verification (constant memory).
@@ -130,7 +131,9 @@ export const POST = handle(async (req: Request) => {
     }
     entries.push({
       originalFilename: (f.filename ?? key.split('/').pop() ?? 'upload').slice(0, 500),
-      mimetype: detected,
+      // F-A2: store the real allowlisted MIME type, never the magic format
+      // token — downstream pins ResponseContentType from this column (B2).
+      mimetype: mimetypeForFormat(detected),
       checksumSha256: claimed,
       exif: body.exif?.[key],
       relativePath: f.relativePath ?? f.relative_path ?? null,

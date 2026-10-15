@@ -4,7 +4,7 @@
 // Python-2.0, PSF, MPL-2.0 (weak copyleft, file-scoped — allowed), LGPL-2.1/3.0
 // (dynamic linkage only — backend must never statically build libvips/libheif).
 // Denylist: GPL-*, AGPL-*, SSPL-*, Commons Clause, Elastic License.
-import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, existsSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = new URL('..', import.meta.url).pathname;
@@ -20,28 +20,37 @@ const warn = [];
 function licenseOf(pkgDir) {
   try {
     const pkg = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'));
-    return String(pkg.license ?? pkg.licenses ?? 'UNKNOWN');
+    const lic = pkg.license ?? pkg.licenses ?? 'UNKNOWN';
+    // licenses: [{type:'MIT',url:...}] object form — join the type strings
+    // instead of stringifying to "[object Object]".
+    if (Array.isArray(lic)) {
+      return lic.map((e) => (typeof e === 'string' ? e : e?.type ?? 'UNKNOWN')).join(' OR ');
+    }
+    return String(lic);
   } catch {
     return 'UNKNOWN';
   }
 }
 
 function walk(dir, depth = 0) {
-  if (depth > 4) return;
+  if (depth > 20) return; // pathological nesting guard (npm flattens; 20 is plenty)
   let entries;
   try { entries = readdirSync(dir); } catch { return; }
   for (const e of entries) {
     if (e.startsWith('.')) continue;
     const p = join(dir, e);
     let st;
-    try { st = statSync(p); } catch { continue; }
+    try { st = lstatSync(p); } catch { continue; }
+    if (st.isSymbolicLink()) continue; // no symlink cycles
     if (!st.isDirectory()) continue;
     if (existsSync(join(p, 'package.json'))) {
       const lic = licenseOf(p);
       if (DENY.some((re) => re.test(lic))) bad.push(`${p.replace(NM + '/', '')}: ${lic}`);
       else if (WARN.some((re) => re.test(lic))) warn.push(`${p.replace(NM + '/', '')}: ${lic}`);
-      if (e.startsWith('@')) walk(p, depth + 1); // scoped: descend one more level
     }
+    // Recurse everywhere: @scoped dirs (no package.json of their own —
+    // previously never scanned), nested node_modules, bundled deps.
+    walk(p, depth + 1);
   }
 }
 

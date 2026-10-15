@@ -40,17 +40,33 @@ export const POST = handle(async (req: Request) => {
   };
 
   const photoRows = await sql()`SELECT p.subject_id, p.mimetype, p.original_filename, p.item_id,
-      p.checksum_sha256
+      p.checksum_sha256, p.r2_key
     FROM photos p JOIN subjects s ON s.id = p.subject_id
     WHERE p.subject_id = ${body.photo_subject_id} AND s.project_id = ${body.project_id}`;
   if (!photoRows.length) throw new HttpError(404, 'not_found', 'photo not found');
   const pr = photoRows[0];
+
+  // CR-2: idempotency guard — a retried /process (client timeout, double
+  // submit) must not re-run the pipeline and double-charge counters.
+  // r2_key is set exactly once, inside the finalizing transaction.
+  if (pr['r2_key']) {
+    const photo = await getPhotoJson(body.project_id, pr['subject_id'] as string);
+    const rev = await sql()`SELECT rev FROM projects WHERE id = ${body.project_id}`;
+    return ok({ photo, job_id: body.job_id, rev: Number(rev[0]['rev']), deduped: true });
+  }
 
   if ((pr['checksum_sha256'] as string) === 'pending') {
     throw new HttpError(409, 'conflict', 'photo checksum is pending — /complete verification first');
   }
 
   const stagedKey = body.staged_key;
+  // CR-7: staged keys are server-minted under uploads/{job_id}/ — never let
+  // the client promote an arbitrary R2 key (another job's staging, another
+  // project's originals/) into this photo.
+  const jobPrefix = `uploads/${body.job_id}/`;
+  if (!stagedKey.startsWith(jobPrefix) || stagedKey.includes('..')) {
+    throw new HttpError(422, 'validation', 'staged_key is not in this job staging prefix');
+  }
   const artifactKey = checkpoint.conversions?.[stagedKey];
   const clientExif = checkpoint.exif?.[stagedKey];
 
@@ -72,6 +88,9 @@ export const POST = handle(async (req: Request) => {
     return ok({ photo, job_id: body.job_id, rev: Number(rev[0]['rev']) });
   } catch (err) {
     if (err instanceof HttpError) throw err; // B5/B6/etc. carry their own status
-    throw new HttpError(500, 'process_failed', err instanceof Error ? err.message : 'photo processing failed');
+    // F-B2: never leak sharp/libvips/DB internals to the client — log
+    // server-side, return a generic message.
+    console.error('import/process failed:', err);
+    throw new HttpError(500, 'process_failed', 'photo processing failed');
   }
 });

@@ -4,15 +4,15 @@ import 'server-only';
 /**
  * lib/cpu-budget.ts — rolling 30-day CPU guard (phase2 §8, ADR-2.23).
  *
- * - Per-invocation `process.cpuUsage()` deltas are charged in the same
- *   transaction as the photo commit (to import_jobs.cpu_seconds AND the
- *   rolling window).
+ * - Per-invocation `process.cpuUsage()` deltas are charged post-commit via
+ *   chargeCpu() (to the rolling window AND import_jobs.cpu_seconds) — never
+ *   in the photo-finalize transaction (that double-charged the job row).
  * - Threshold 80% (11,520 s of the 14,400 s cap) → window paused = TRUE;
  *   queued/running jobs flip to paused_cpu; guard-checked routes answer
  *   503 + Retry-After + resume date.
  * - Uploads are NEVER gated (presigned PUTs cost ~zero CPU).
  * - Resume is lazy: the window rolls on any guard check + the nightly cron
- *   ticks it.
+ *   ticks it and flips paused_cpu jobs back to queued.
  */
 
 import { sql } from './db/index';

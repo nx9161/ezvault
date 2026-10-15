@@ -24,6 +24,7 @@ import { tiptapToText } from '../export/jsonld.js';
 import { HttpError } from '../api/route-utils';
 
 import { strictDocumentLoader, TROPY_CONTEXT_URL } from './jsonld-context';
+import { isAllowedUploadMimetype } from './validation';
 
 export { strictDocumentLoader, TROPY_CONTEXT_URL };
 
@@ -435,7 +436,10 @@ export async function acceptJsonLd(
       const photoId = randomUUID();
       const imageId = randomUUID();
       const filename = nodeText(p['filename']) || nodeText(p['path'])?.split('/').pop() || 'photo';
-      const mimetype = nodeText(p['mimetype']) || 'image/jpeg';
+      // F-B1: the mimetype comes from untrusted JSON-LD — allowlist it before
+      // it lands in photos.mimetype (later reflected as ResponseContentType).
+      const claimedMimetype = nodeText(p['mimetype']) || 'image/jpeg';
+      const mimetype = isAllowedUploadMimetype(claimedMimetype) ? claimedMimetype.toLowerCase() : 'image/jpeg';
       const checksum = nodeText(p['checksum']);
       const stagedKey = p['path'] && opts.pathKeys ? opts.pathKeys[nodeText(p['path'])] : undefined;
 

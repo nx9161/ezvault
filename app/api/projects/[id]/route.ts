@@ -89,10 +89,13 @@ export const DELETE = handle(async (_req: Request, ctx: Ctx) => {
     doomed.push(...(await storage.listKeys(`tpy-staging/${j.id}/`)));
     doomed.push(...(await storage.listKeys(`uploads/${j.id}/`)));
   }
-  await storage.deleteMany(doomed);
-
-  // DB cascade: subjects -> everything (ON DELETE CASCADE throughout).
-  // command_log.project_id cascades too.
+  // CR-3: DB cascade FIRST, R2 deletes after commit. If the DELETE fails,
+  // every key reference survives — retryable. Leaked bytes (deleteMany
+  // failing after commit) are the lesser evil vs ghost rows on an
+  // IRREVERSIBLE op.
   await tx((q) => [q(`DELETE FROM projects WHERE id = $1`, [id])]);
+  await storage.deleteMany(doomed).catch((err) => {
+    console.error('project DELETE: R2 deleteMany failed after DB commit:', err);
+  });
   return ok({ deleted: id, r2_objects_deleted: doomed.length });
 });
