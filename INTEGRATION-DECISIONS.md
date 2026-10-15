@@ -220,7 +220,7 @@ clean, `npm test` green, `next build` green).
 
 ## 5. @playwright/test@1.64.1 — E2E harness (Wave 2, dev-only)
 
-**Status:** ACCEPTED · landed 2026-10-15 · commit `<fill>`
+**Status:** ACCEPTED · landed 2026-10-15 · commit `73f8f2e`
 
 **What it is:** Microsoft's end-to-end test runner (Chromium/Firefox/WebKit).
 
