@@ -33,6 +33,8 @@ const BUCKETS: Record<string, BucketConfig> = {
   'export:jsonld': { capacity: 30, refillPerSec: 0.5 },
   'export:file': { capacity: 120, refillPerSec: 2 }, // bake/export per photo
   'storage:compress': { capacity: 10, refillPerSec: 0.17 },
+  // F-F: the nuclear option — 3 attempts, ~1/hour refill.
+  'admin:delete-everything': { capacity: 3, refillPerSec: 1 / 3600 },
 };
 
 export interface RateLimitResult {

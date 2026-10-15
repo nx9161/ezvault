@@ -10,9 +10,20 @@ every monthly backup permanently unrecoverable (each backup's data key
 was wrapped with it — without it the wrapped key cannot be unwrapped and
 no `.enc` payload can be decrypted). There is no recovery afterward.
 
-**v1.1 note:** the in-app "purge everything" button is NOT built in v1 —
-the manual procedure below is the only path. Do not script it further
-without a War Room decision.
+**v1.1 note:** the in-app purge now exists as
+`POST /api/admin/delete-everything` — it deletes every object under the
+live R2 prefixes (`originals/`, `thumbs/`, `exports/`, `uploads/`,
+`tpy-staging/`) and `TRUNCATE`s every app table `CASCADE`. The request
+body MUST be exactly `{"confirm":"DELETE"}` (anything else → 400), the
+route is rate-limited to 3 attempts with ~1/hour refill, and the response
+always discloses the 365-day backup retention (see below). The frontend
+button + typed-confirm dialog wire against that endpoint shape.
+
+What the endpoint does NOT do: destroy `MASTER_KEY` or touch the backup
+bucket. Backups are retained under the 365-day lifecycle and stay
+recoverable until the owner completes Steps 1–3 below — crypto-shredding
+stays deliberate and manual. Do not script Steps 1–3 further without a
+War Room decision.
 
 ### Step 1 — Destroy MASTER_KEY (renders all backups unrecoverable)
 
