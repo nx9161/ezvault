@@ -28,6 +28,7 @@ import {
   runCommand,
   trashSubjectsOp,
   attachTagsOp,
+  reorderListItemsOp,
   type OpContext,
 } from "@/lib/commands/ops";
 import { useOpContext } from "@/components/sidebar/Sidebar";
@@ -193,12 +194,18 @@ function ItemGrid({
   items,
   projectId,
   label,
+  reorderable,
+  onReorder,
 }: {
   items: Item[];
   projectId: string;
   /** contextual breadcrumb label for the grid's aria-label (D-MICRO) */
   label: string;
+  /** F-A: drag-reorder is enabled when viewing a list */
+  reorderable: boolean;
+  onReorder: (draggedId: string, targetId: string) => void;
 }) {
+  const t = useTranslations("center");
   const density = useUiStore((s) => s.density);
   const selectedIds = useUiStore((s) => s.selectedIds);
   const setSelectedIds = useUiStore((s) => s.setSelectedIds);
@@ -209,6 +216,9 @@ function ItemGrid({
   const [width, setWidth] = useState(0);
   const [focusId, setFocusId] = useState<string | null>(null);
   const refs = useRef(new Map<string, HTMLDivElement>());
+  // F-A drag-reorder state.
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropId, setDropId] = useState<string | null>(null);
 
   useEffect(() => {
     const el = parentRef.current;
@@ -310,6 +320,36 @@ function ItemGrid({
             <div
               key={item.id}
               data-item-id={item.id}
+              draggable={reorderable}
+              title={reorderable ? t("dragToReorder") : undefined}
+              className={dropId === item.id ? "ez-drop-target" : undefined}
+              onDragStart={(e) => {
+                if (!reorderable) return;
+                setDragId(item.id);
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", item.id);
+              }}
+              onDragOver={(e) => {
+                if (!reorderable || !dragId || dragId === item.id) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                setDropId(item.id);
+              }}
+              onDragLeave={() => {
+                if (dropId === item.id) setDropId(null);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (reorderable && dragId && dragId !== item.id) {
+                  onReorder(dragId, item.id);
+                }
+                setDragId(null);
+                setDropId(null);
+              }}
+              onDragEnd={() => {
+                setDragId(null);
+                setDropId(null);
+              }}
               style={{
                 position: "absolute",
                 top: 0,
@@ -318,6 +358,7 @@ function ItemGrid({
                 paddingRight: gap,
                 paddingBottom: gap,
                 transform: `translateY(${vi.start}px)`,
+                opacity: dragId === item.id ? 0.5 : undefined,
               }}
             >
               <ItemCard
@@ -758,6 +799,48 @@ export default function CenterPanel({ projectId }: { projectId: string }) {
   );
   const ctx = useOpContext(projectId);
 
+  // F-A: drag-reorder within a list. The server persists absolute positions
+  // (list_items.position); the items endpoint does not yet return them, so
+  // the reordered view is held client-side for the session. Once the backend
+  // exposes item.position, the position-aware sort below takes over.
+  const [manualOrder, setManualOrder] = useState<string[] | null>(null);
+  useEffect(() => {
+    setManualOrder(null);
+  }, [activeListId]);
+  const displayItems = useMemo(() => {
+    const positioned = items as (Item & { position?: number })[];
+    if (
+      activeListId &&
+      items.length > 0 &&
+      positioned.every((i) => typeof i.position === "number")
+    ) {
+      return [...positioned].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+    }
+    if (manualOrder && activeListId) {
+      const idx = new Map(manualOrder.map((id, i) => [id, i]));
+      return [...items].sort(
+        (a, b) => (idx.get(a.id) ?? Infinity) - (idx.get(b.id) ?? Infinity),
+      );
+    }
+    return items;
+  }, [items, manualOrder, activeListId]);
+
+  async function handleReorder(draggedId: string, targetId: string) {
+    if (!activeListId) return;
+    const ids = displayItems.map((i) => i.id);
+    const from = ids.indexOf(draggedId);
+    const to = ids.indexOf(targetId);
+    if (from < 0 || to < 0 || from === to) return;
+    const next = [...ids];
+    next.splice(to, 0, ...next.splice(from, 1));
+    setManualOrder(next);
+    await runCommand(
+      ctx,
+      reorderListItemsOp(ctx, activeListId, ids, next),
+      ["items"],
+    );
+  }
+
   const breadcrumb = useMemo(() => {
     if (searchActive) return t("breadcrumbSearch");
     if (libraryFilter === "trash") return t("breadcrumbTrash");
@@ -860,9 +943,15 @@ export default function CenterPanel({ projectId }: { projectId: string }) {
           <p>{t("emptyListBody")}</p>
         </div>
       ) : view === "grid" ? (
-        <ItemGrid items={items} projectId={projectId} label={breadcrumb} />
+        <ItemGrid
+          items={displayItems}
+          projectId={projectId}
+          label={breadcrumb}
+          reorderable={!!activeListId}
+          onReorder={handleReorder}
+        />
       ) : (
-        <ItemTable items={items} projectId={projectId} label={breadcrumb} />
+        <ItemTable items={displayItems} projectId={projectId} label={breadcrumb} />
       )}
     </section>
   );

@@ -138,6 +138,41 @@ export function moveListOp(
   });
 }
 
+/** F-A: drag-reorder items within a list. Positions are absolute (index in
+ *  the list order); only items whose position changed are written, via the
+ *  existing list-items POST upsert. Undo restores the previous positions.
+ *  The grid sorts by item.position when the backend exposes it; until then
+ *  the reordered view is held client-side for the session (see CenterPanel). */
+export function reorderListItemsOp(
+  ctx: OpContext,
+  listId: string,
+  prevOrder: string[],
+  nextOrder: string[],
+): Command {
+  async function write(order: string[], prev: string[]) {
+    const prevIdx = new Map(prev.map((id, i) => [id, i]));
+    await Promise.all(
+      order.flatMap((id, i) =>
+        prevIdx.get(id) !== i
+          ? [
+              post(
+                `${key.lists(ctx.projectId)}/${listId}/items`,
+                { item_id: id, position: i },
+                { opId: newClientOpId() },
+              ),
+            ]
+          : [],
+      ),
+    );
+  }
+  return makeCommand(
+    "Reorder items",
+    "items",
+    () => write(nextOrder, prevOrder),
+    () => write(prevOrder, nextOrder),
+  );
+}
+
 export function deleteListOp(ctx: OpContext, list: ListNode): Command {
   return makeCommand("Delete list", "lists", async () => {
     await del(`${key.lists(ctx.projectId)}/${list.id}`, undefined, { opId: newClientOpId() });
