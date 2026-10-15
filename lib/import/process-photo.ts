@@ -79,6 +79,35 @@ export async function verifyStagedSha256(stagedKey: string, expectedHex: string)
   }
 }
 
+/**
+ * Stream-hash a staged object, returning the lowercase hex SHA-256
+ * (constant memory). W2-D: the relink route uses this for the explicit-link
+ * path, where there is no client claim to verify — the server computes the
+ * digest itself so the photo row always records a real checksum.
+ */
+export async function sha256OfStaged(stagedKey: string): Promise<string> {
+  const storage = await getStorageDriver();
+  const hash = createHash('sha256');
+  if (storage.name === 'local') {
+    const { diskPath } = await import('../storage/local');
+    const { createReadStream } = await import('node:fs');
+    await new Promise<void>((resolve, reject) => {
+      const rs = createReadStream(diskPath(stagedKey));
+      rs.on('data', (c) => hash.update(c));
+      rs.on('end', () => resolve());
+      rs.on('error', reject);
+    });
+    return hash.digest('hex');
+  }
+  const { GetObjectCommand } = await import('@aws-sdk/client-s3');
+  const client = (storage as unknown as { client: S3Client }).client;
+  const bucket = process.env.R2_BUCKET_DATA || 'ezvault-data';
+  const out = await client.send(new GetObjectCommand({ Bucket: bucket, Key: stagedKey }));
+  if (!out.Body) throw new HttpError(422, 'unreadable', 'staged object has no body');
+  for await (const chunk of out.Body as unknown as AsyncIterable<Uint8Array>) hash.update(chunk);
+  return hash.digest('hex');
+}
+
 export interface ProcessedPhoto {
   photoSubjectId: string;
   r2Key: string;

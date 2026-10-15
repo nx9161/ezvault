@@ -78,5 +78,20 @@ export const POST = handle(async (req: Request) => {
   if (result.done) {
     await sql()`UPDATE import_jobs SET status = 'done', updated_at = now() WHERE id = ${body.job_id}`;
   }
-  return ok({ job_id: body.job_id, ...result });
+  // W2-D: the relink UI's missing list. The wizard reads
+  // report.missing_originals — nothing produced it server-side before, so
+  // the relink step never rendered. Job-scoped via tpy_import_map.
+  const missingOriginals = await sql()`SELECT p.subject_id AS photo_subject_id,
+      p.original_filename AS filename
+    FROM photos p JOIN tpy_import_map m ON m.new_subject_id = p.subject_id
+    WHERE m.job_id = ${body.job_id} AND p.missing_original = true
+    ORDER BY p.original_filename`;
+  return ok({
+    job_id: body.job_id,
+    ...result,
+    missing_originals: missingOriginals.map((r) => ({
+      filename: r['filename'] as string,
+      photo_subject_id: r['photo_subject_id'] as string,
+    })),
+  });
 });
