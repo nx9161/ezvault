@@ -25,14 +25,14 @@ import 'server-only';
 
 import { createHash } from 'node:crypto';
 import type { S3Client } from '@aws-sdk/client-s3';
-import { getStorageDriver, keys, extForMimetype } from '../storage/driver.js';
-import { detectFormat, magicMatchesMimetype, mimetypeForFormat } from './magic.js';
-import { isAllowedUploadMimetype, MAX_INPUT_PIXELS, MAGIC_PROBE_BYTES } from './validation.js';
-import { sanitizeSvg, SvgRejectedError } from './svg-sanitize.js';
-import { renderThumb } from '../export/bake.js';
-import { sql, tx, bumpRevQuery, bumpCountersQuery } from '../db/index.js';
-import { checkCpuGuard, chargeCpu } from '../cpu-budget.js';
-import { HttpError } from '../api/route-utils.js';
+import { getStorageDriver, keys, extForMimetype } from '../storage/driver';
+import { detectFormat, magicMatchesMimetype, mimetypeForFormat } from './magic';
+import { isAllowedUploadMimetype, MAX_INPUT_PIXELS, MAGIC_PROBE_BYTES } from './validation';
+import { sanitizeSvg, SvgRejectedError } from './svg-sanitize';
+import { renderThumb } from '../export/bake';
+import { sql, tx, bumpRevQuery, bumpCountersQuery } from '../db/index';
+import { checkCpuGuard, chargeCpu } from '../cpu-budget';
+import { HttpError } from '../api/route-utils';
 
 export interface ProcessPhotoInput {
   projectId: string;
@@ -52,7 +52,7 @@ export interface ProcessPhotoInput {
 export async function verifyStagedSha256(stagedKey: string, expectedHex: string): Promise<void> {
   const storage = await getStorageDriver();
   if (storage.name === 'local') {
-    const { diskPath } = await import('../storage/local.js');
+    const { diskPath } = await import('../storage/local');
     const { createReadStream } = await import('node:fs');
     const hash = createHash('sha256');
     await new Promise<void>((resolve, reject) => {
@@ -122,7 +122,7 @@ export async function processPhoto(input: ProcessPhotoInput): Promise<ProcessedP
   let originalBytes: Buffer;
   let decodeBytes: Buffer;
   if (storage.name === 'local') {
-    const { diskPath } = await import('../storage/local.js');
+    const { diskPath } = await import('../storage/local');
     const { readFile } = await import('node:fs/promises');
     originalBytes = await readFile(diskPath(stagedKey));
     decodeBytes = decodeKey === stagedKey ? originalBytes : await readFile(diskPath(decodeKey));

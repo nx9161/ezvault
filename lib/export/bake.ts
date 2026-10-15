@@ -17,7 +17,7 @@ import 'server-only';
  * EXIF orientation is normalized into pixels; EXIF stripped by default.
  */
 
-import type { EditParams } from '../types.js';
+import type { EditParams } from '../types';
 
 export interface BakeOptions {
   edits: EditParams;

@@ -103,6 +103,10 @@ export interface Item {
   cover_image_id: UUID | null;
   created_at: string;
   updated_at: string;
+  /** Derived counts (read model; not stored). */
+  photo_count: number;
+  selection_count: number;
+  note_count: number;
 }
 
 /** Non-destructive edit params — Tropy-exact columns (ADR-2.21). */
@@ -232,6 +236,8 @@ export interface Selection {
   position: number;
   template_id: UUID | null;
   created_at: string;
+  /** Derived count (read model; not stored). */
+  note_count: number;
 }
 
 export interface CreateSelectionRequest {
@@ -453,7 +459,7 @@ export interface SearchHit {
   project_id: UUID;
   subject_kind: SubjectKind;
   rank: number;
-  /** HTML snippet with <mark> highlights (server-escaped, B14). */
+  /** Safe HTML with <mark> highlights (server-escaped, B14). Render as-is. */
   snippet: string;
 }
 
@@ -530,8 +536,14 @@ export interface PresignResponse {
 export interface ImportCompleteRequest {
   job_id: UUID;
   project_id: UUID;
-  /** Keys the client actually PUT (subset of grants is fine). */
-  keys: string[];
+  /**
+   * Files the client PUT. Preferred shape: files[] with per-file sha256
+   * (server-verified, B18). The legacy keys[] shape is accepted when sha256
+   * was supplied at presign time and matches the staged key order — prefer
+   * files[] for new clients.
+   */
+  files?: Array<{ key: string; sha256: string }>;
+  keys?: string[];
   /**
    * Browser-decoded HEIC/HEIF/AVIF → JPEG conversion artifacts.
    * Each entry links the artifact's staged key to the original's staged key;
@@ -544,21 +556,24 @@ export interface ImportCompleteRequest {
   clientOpId?: UUID;
 }
 
+export interface ImportCompletePhoto {
+  key: string;
+  photo_subject_id: UUID;
+  item_id: UUID;
+  dedupe: 'created' | 'skipped_duplicate' | 'kept_both';
+}
+
 export interface ImportCompleteResponse extends MutationMeta {
   job_id: UUID;
-  accepted: string[];
+  accepted: ImportCompletePhoto[];
   rejected: Array<{ key: string; reason: string }>;
 }
 
 export interface ImportProcessRequest {
   job_id: UUID;
   project_id: UUID;
+  photo_subject_id: UUID;
   staged_key: string;
-  item_id?: UUID;
-  original_filename: string;
-  mimetype: string;
-  checksum_sha256: string;
-  exif?: Record<string, unknown>;
   clientOpId?: UUID;
 }
 

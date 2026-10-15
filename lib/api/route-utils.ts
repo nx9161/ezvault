@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+import 'server-only';
 /**
  * lib/api/route-utils.ts — shared primitives for /api/* route handlers.
  *
@@ -8,7 +9,7 @@
  * (ADR-2.2 — no Edge routes, sharp/sql.js need Node APIs.)
  */
 
-import { sql, getProject } from '../../lib/db/index.js';
+import { sql, getProject } from '../../lib/db/index';
 
 // ---------------------------------------------------------------------------
 // Responses

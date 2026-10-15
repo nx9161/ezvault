@@ -16,7 +16,7 @@ import 'server-only';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
-import type { StorageDriver, HeadInfo, PresignGetOptions } from './driver.js';
+import type { StorageDriver, HeadInfo, PresignGetOptions } from './driver';
 
 const PUT_TTL_SEC = 15 * 60;
 const GET_TTL_SEC = 5 * 60;
@@ -102,7 +102,7 @@ export class LocalStorageDriver implements StorageDriver {
   async head(key: string): Promise<HeadInfo | null> {
     try {
       const st = await fs.stat(diskPath(key));
-      return { size: st.size };
+      return { size: st.size, lastModified: st.mtime.toISOString() };
     } catch {
       return null;
     }

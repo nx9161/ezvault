@@ -1,0 +1,112 @@
+# SPDX-License-Identifier: MIT
+# Monthly EZVault backup: pg_dump (custom format) + JSON-LD (shared module)
+# into a PRIVATE storage bucket with a 365-day lifecycle.
+#
+# B26 crypto-shredding design (comments, not keys): each run writes a NEW
+# object key (backups/<date>/<uuid>.dump / <uuid>.json); nothing is ever
+# overwritten. Deleting the key destroys the only copy of that month's
+# plaintext — bucket lifecycle expires objects after 365 days.
+#
+# Secrets only via ${{ secrets.* }}. Restores are never run from this job.
+
+name: backup-monthly
+
+on:
+  schedule:
+    - cron: '17 4 1 * *' # 04:17 UTC on the 1st, monthly
+  workflow_dispatch: {} # manual run (still needs secrets)
+
+permissions:
+  contents: read # no write needed
+
+concurrency:
+  group: backup-monthly
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Set up pg client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: pg_dump (custom format)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          mkdir -p backups/pg
+          stamp="$(date -u +%Y-%m-%d)"
+          uuid="$(node -e 'console.log(require("crypto").randomUUID())')"
+          out="backups/pg/ezvault-${stamp}-${uuid}.dump"
+          pg_dump --format=custom --no-owner --no-privileges \
+            --file="$out" "$DATABASE_URL"
+          echo "PG_DUMP=$out" >> "$GITHUB_ENV"
+
+      - name: Verify pg_dump (pg_restore --list + row counts)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          pg_restore --list "$PG_DUMP" > /tmp/restore.list
+          tables="$(grep -c '^;.* TABLE ' /tmp/restore.list || true)"
+          echo "pg_restore --list: $tables table entries"
+          if [ "$tables" -lt 20 ]; then
+            echo "FAIL: expected 20+ table entries in the dump"
+            exit 1
+          fi
+          # Spot-check live row counts for the core tables (drift check, not restore).
+          node --input-type=module -e '
+            import { neon } from "@neondatabase/serverless";
+            const sql = neon(process.env.DATABASE_URL);
+            for (const t of ["subjects", "photos", "notes", "import_jobs"]) {
+              const r = await sql.query("SELECT COUNT(*)::int AS c FROM " + t);
+              console.log(t, r[0].c);
+            }'
+
+      - name: JSON-LD dump (shared module lib/export/jsonld.js)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: node scripts/backup-jsonld.mjs
+
+      - name: Upload to private bucket
+        env:
+          S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          BACKUP_BUCKET: ${{ secrets.BACKUP_BUCKET }}
+        run: |
+          # Private bucket; no public ACLs. Per-run keys (see header comments).
+          aws s3 sync backups/ "s3://$BACKUP_BUCKET/backups/" \
+            --endpoint-url "$S3_ENDPOINT" --no-progress --acl private
+
+      - name: Enforce 365-day lifecycle (idempotent)
+        env:
+          S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          BACKUP_BUCKET: ${{ secrets.BACKUP_BUCKET }}
+        run: |
+          aws s3api put-bucket-lifecycle-configuration --bucket "$BACKUP_BUCKET" \
+            --endpoint-url "$S3_ENDPOINT" --lifecycle-configuration '{
+              "Rules": [{
+                "ID": "monthly-backup-expiry",
+                "Status": "Enabled",
+                "Filter": { "Prefix": "backups/" },
+                "Expiration": { "Days": 365 }
+              }]
+            }'
+
+      - name: Scrub local copies
+        if: always()
+        run: rm -rf backups/

@@ -15,8 +15,8 @@ import 'server-only';
  *   ticks it.
  */
 
-import { sql } from './db/index.js';
-import { HttpError } from './api/route-utils.js';
+import { sql } from './db/index';
+import { HttpError } from './api/route-utils';
 
 export const CPU_CAP_S = 14400; // 4 CPU-hours / 30d (Vercel Hobby mirror)
 export const CPU_GUARD_S = 11520; // 80% pause threshold

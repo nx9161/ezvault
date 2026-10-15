@@ -12,7 +12,7 @@
  */
 
 import { parser as saxParser } from 'sax';
-import { MAX_INPUT_PIXELS } from './validation.js';
+import { MAX_INPUT_PIXELS } from './validation';
 
 export class SvgRejectedError extends Error {
   constructor(message: string) {
@@ -27,8 +27,8 @@ function escapeText(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** Tags whose whole subtree is dropped. */
-const DROP_TAGS = new Set(['script', 'foreignobject', 'foreignObject']);
+/** Tags whose whole subtree is dropped (B6: script, style, foreignObject). */
+const DROP_TAGS = new Set(['script', 'style', 'foreignobject', 'foreignObject']);
 
 /** Attributes stripped everywhere. */
 function isStrippedAttr(name: string): boolean {

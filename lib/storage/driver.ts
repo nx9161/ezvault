@@ -11,6 +11,8 @@ export interface HeadInfo {
   size: number;
   contentType?: string;
   metadata?: Record<string, string>;
+  /** ISO timestamp of last write (for lifecycle sweeps); may be absent. */
+  lastModified?: string;
 }
 
 export interface PresignGetOptions {
@@ -75,8 +77,8 @@ let cached: StorageDriver | null = null;
  */
 export async function getStorageDriver(): Promise<StorageDriver> {
   if (cached) return cached;
-  const { R2StorageDriver } = await import('./r2.js');
-  const { LocalStorageDriver } = await import('./local.js');
+  const { R2StorageDriver } = await import('./r2');
+  const { LocalStorageDriver } = await import('./local');
   const hasAccount = Boolean(process.env.R2_ACCOUNT_ID);
   const hasKey = Boolean(process.env.R2_ACCESS_KEY_ID);
   const hasSecret = Boolean(process.env.R2_SECRET_ACCESS_KEY);

@@ -30,15 +30,15 @@ import 'server-only';
  */
 
 import { randomUUID, createHash } from 'node:crypto';
-import { getStorageDriver, keys, extForMimetype } from '../storage/driver.js';
-import { sql, tx, bumpRevQuery, bumpCountersQuery, type TxQuery } from '../db/index.js';
-import { sanitizeTiptapDoc } from '../notes/sanitize.js';
+import { getStorageDriver, keys, extForMimetype } from '../storage/driver';
+import { sql, tx, bumpRevQuery, bumpCountersQuery, type TxQuery } from '../db/index';
+import { sanitizeTiptapDoc } from '../notes/sanitize';
 import { tiptapToText } from '../export/jsonld.js';
-import { processPhoto } from './process-photo.js';
-import { detectFormat, mimetypeForFormat } from './magic.js';
-import { isAllowedUploadMimetype, stagedExtension, TPY_MAX_BYTES, TPY_HARD_MAX_BYTES } from './validation.js';
-import { checkCpuGuard } from '../cpu-budget.js';
-import { HttpError } from '../api/route-utils.js';
+import { processPhoto } from './process-photo';
+import { detectFormat, mimetypeForFormat } from './magic';
+import { isAllowedUploadMimetype, stagedExtension, TPY_MAX_BYTES, TPY_HARD_MAX_BYTES } from './validation';
+import { checkCpuGuard } from '../cpu-budget';
+import { HttpError } from '../api/route-utils';
 
 export const TPY_APPLICATION_ID = -621960955;
 export const TPY_PINNED_USER_VERSIONS = [2112312400];

@@ -14,7 +14,7 @@ import 'server-only';
  * trivial rows, negligible CU).
  */
 
-import { sql } from './db/index.js';
+import { sql } from './db/index';
 
 interface BucketConfig {
   capacity: number;
@@ -86,7 +86,7 @@ export async function consumeRateBucket(key: string): Promise<RateLimitResult> {
 export async function requireRateLimit(key: string): Promise<void> {
   const r = await consumeRateBucket(key);
   if (!r.allowed) {
-    const { HttpError } = await import('./api/route-utils.js');
+    const { HttpError } = await import('./api/route-utils');
     const err = new HttpError(429, 'rate_limited', 'rate limit exceeded — slow down');
     (err as unknown as { retryAfterSec: number }).retryAfterSec = r.retryAfterSec;
     throw err;

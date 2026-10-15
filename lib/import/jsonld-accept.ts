@@ -18,35 +18,14 @@ import 'server-only';
  */
 
 import { randomUUID } from 'node:crypto';
-import { sql, tx, bumpRevQuery, type TxQuery } from '../db/index.js';
-import { sanitizeNoteHtml, sanitizeTiptapDoc, isAllowedLinkUrl } from '../notes/sanitize.js';
+import { sql, tx, bumpRevQuery, type TxQuery } from '../db/index';
+import { sanitizeNoteHtml, sanitizeTiptapDoc, isAllowedLinkUrl } from '../notes/sanitize';
 import { tiptapToText } from '../export/jsonld.js';
-import { HttpError } from '../api/route-utils.js';
+import { HttpError } from '../api/route-utils';
 
-export const TROPY_CONTEXT_URL = 'https://tropy.org/v1/tropy#';
+import { strictDocumentLoader, TROPY_CONTEXT_URL } from './jsonld-context';
 
-/** Inline allowlisted context (B10 — the ONLY remote context ever served). */
-const INLINE_TROPY_CONTEXT = {
-  '@context': {
-    '@vocab': TROPY_CONTEXT_URL,
-    Item: `${TROPY_CONTEXT_URL}Item`,
-    Note: `${TROPY_CONTEXT_URL}Note`,
-    Selection: `${TROPY_CONTEXT_URL}Selection`,
-  },
-};
-
-/**
- * B10 documentLoader: serves the inline tropy.org context, rejects every
- * other remote context (SSRF guard). Throws on any non-allowlisted URL.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function strictDocumentLoader(url: string): Promise<any> {
-  const normalized = url.trim().replace(/#$/, '');
-  if (normalized === TROPY_CONTEXT_URL || normalized === 'https://tropy.org/v1/tropy') {
-    return { contextUrl: null, documentUrl: url, document: INLINE_TROPY_CONTEXT };
-  }
-  throw new HttpError(422, 'remote_context_rejected', `remote JSON-LD context rejected: ${url}`);
-}
+export { strictDocumentLoader, TROPY_CONTEXT_URL };
 
 // ---------------------------------------------------------------------------
 // HTML -> TipTap (operates on sanitizeNoteHtml output, B13)
@@ -254,10 +233,19 @@ export async function acceptJsonLd(
   opts: JsonLdAcceptOptions = {},
 ): Promise<JsonLdAcceptResult> {
   const { default: jsonld } = await import('jsonld');
+  const { RemoteContextRejectedError } = await import('./jsonld-context');
   // B10: expansion with the strict documentLoader (no remote contexts).
-  const expanded = (await jsonld.expand(doc as never, {
-    documentLoader: strictDocumentLoader,
-  } as never)) as JsonLdNode[];
+  let expanded: JsonLdNode[];
+  try {
+    expanded = (await jsonld.expand(doc as never, {
+      documentLoader: strictDocumentLoader,
+    } as never)) as JsonLdNode[];
+  } catch (err) {
+    if (err instanceof RemoteContextRejectedError) {
+      throw new HttpError(422, 'remote_context_rejected', err.message);
+    }
+    throw err;
+  }
 
   const jobId = randomUUID();
   await sql()`INSERT INTO import_jobs (id, project_id, kind, status, total)

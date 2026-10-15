@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-import { handle, ok, parseJson, pagination, nextCursor, HttpError } from '@/lib/api/route-utils.js';
-import { sql, tx } from '@/lib/db/index.js';
+import { handle, ok, parseJson, pagination, nextCursor, HttpError } from '@/lib/api/route-utils';
+import { sql, tx } from '@/lib/db/index';
 import { randomUUID } from 'node:crypto';
 
 export const runtime = 'nodejs';

@@ -10,8 +10,8 @@ import 'server-only';
  */
 
 import { randomUUID } from 'node:crypto';
-import { sql } from '../db/index.js';
-import { HttpError } from '../api/route-utils.js';
+import { sql } from '../db/index';
+import { HttpError } from '../api/route-utils';
 
 /** B12: triple cap for streaming Turtle/N3 import. */
 export const MAX_TRIPLES = 50_000;

@@ -106,3 +106,6 @@ export function mimetypeForFormat(format: DetectedFormat): string {
     case 'avif': return 'image/avif';
   }
 }
+
+/** Alias for route-friendly naming (identical to detectFormat). */
+export const detectFromBytes = detectFormat;

@@ -3,7 +3,7 @@
  * lib/import/validation.ts — upload-pipeline validation constants (B4).
  */
 
-import { UPLOAD_MIMETYPES } from '../types.js';
+import { UPLOAD_MIMETYPES } from '../types';
 
 /** B4: per-photo byte cap, enforced at /complete via HeadObject (413). */
 export const MAX_PHOTO_BYTES = 200 * 1024 * 1024; // 200 MB

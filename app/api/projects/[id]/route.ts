@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-import { handle, ok, parseJson, requireProject, HttpError } from '@/lib/api/route-utils.js';
-import { sql, tx, bumpRevQuery } from '@/lib/db/index.js';
-import { getStorageDriver } from '@/lib/storage/driver.js';
+import { handle, ok, parseJson, requireProject, HttpError } from '@/lib/api/route-utils';
+import { sql, tx, bumpRevQuery } from '@/lib/db/index';
+import { getStorageDriver } from '@/lib/storage/driver';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;

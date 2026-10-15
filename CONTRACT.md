@@ -18,7 +18,11 @@ builder via the coordinator.
 - `lib/search/**` (query building; snippet sentinel logic lives in the route)
 - `lib/ratelimit.ts`, `lib/cpu-budget.ts`, `lib/auth.ts` (CRON_SECRET compare)
 - `db/migrations/**` (numbered SQL; the DDL from architecture §3 + FTS triggers §4)
-- `middleware.ts` (CSRF origin check on mutating routes; strict CSP; security headers)
+- `proxy.ts` — Next 16 renamed `middleware.ts` → `proxy.ts` (middleware.ts is
+  deprecated; we ship ONLY proxy.ts). Same duties: CSRF origin check on
+  mutating routes; strict CSP (zero inline scripts); security headers;
+  best-effort in-memory token-bucket outer layer (durable rate limiting is
+  `lib/ratelimit.ts`, B16).
 - `scripts/**` (`secret-scan.sh`, `verify-codecs.mjs`, `check-licences.mjs`)
 - `.env.example`, `.github/workflows/backup-monthly.yml`
 
@@ -33,6 +37,18 @@ builder via the coordinator.
 
 1. Backend writes `lib/notes/sanitize.ts` + `lib/types.ts` FIRST and pushes.
 2. Frontend consumes them; never forks its own copy.
+
+## Search snippet contract (B14 — binding)
+
+- `GET /api/projects/[id]/search` returns snippets whose highlight markup is
+  produced server-side: `ts_headline` is called with unique sentinel
+  StartSel/StopSel tokens (see `lib/search/query.ts` `headlineOptions()`),
+  the whole headline is HTML-escaped, then sentinels are swapped for
+  `<mark>`/`</mark>` (see `sentinelToMark()`).
+- The wire format is **safe HTML containing `<mark>` elements** — the
+  frontend must render `snippet` as HTML as-is and MUST NOT re-split or
+  re-escape it. No client-side sentinel handling; the sentinels never appear
+  in the wire payload.
 
 ## Binding rules (from the War Room — non-negotiable)
 

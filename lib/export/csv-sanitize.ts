@@ -37,3 +37,10 @@ export function toCsv(headers: readonly unknown[], rows: readonly (readonly unkn
   for (const row of rows) lines.push(sanitizeCsvRow(row).map(quoteField).join(','));
   return lines.join('\r\n') + '\r\n';
 }
+
+/** Route-friendly aliases (same semantics, shorter names). */
+export const csvCell = sanitizeCsvCell;
+/** One sanitized+quoted CSV line (without the trailing newline). */
+export function csvRow(cells: readonly unknown[]): string {
+  return sanitizeCsvRow(cells).map(quoteField).join(',');
+}

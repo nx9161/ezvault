@@ -62,6 +62,15 @@ export function sql(): SqlTag {
   return cached;
 }
 
+/**
+ * Parameterized raw query for dynamically-built SQL (filters/sorts).
+ * Always pass user input as params ($1, $2…), never interpolate.
+ */
+export async function queryRaw<T = Record<string, unknown>>(text: string, params: unknown[] = []): Promise<T[]> {
+  const rows = await rawSql().query(text, params);
+  return rows as unknown as T[];
+}
+
 /** A single query inside a tx() batch. */
 export type TxQuery = {
   text: string;

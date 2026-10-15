@@ -13,7 +13,7 @@
  * inject markup because everything except the sentinels was escaped.
  */
 
-import { SEARCH_SENTINEL_START, SEARCH_SENTINEL_END } from '../types.js';
+import { SEARCH_SENTINEL_START, SEARCH_SENTINEL_END } from '../types';
 
 /** ts_headline options string with sentinel selection markers. */
 export function headlineOptions(): string {

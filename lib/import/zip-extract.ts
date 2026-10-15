@@ -19,9 +19,9 @@ import 'server-only';
  */
 
 import { inflateRawSync } from 'node:zlib';
-import { getStorageDriver, keys } from '../storage/driver.js';
-import { MAX_PHOTO_BYTES, ASSETS_ZIP_MAX_UNCOMPRESSED, ASSETS_ZIP_MAX_ENTRIES } from './validation.js';
-import { HttpError } from '../api/route-utils.js';
+import { getStorageDriver, keys } from '../storage/driver';
+import { MAX_PHOTO_BYTES, ASSETS_ZIP_MAX_UNCOMPRESSED, ASSETS_ZIP_MAX_ENTRIES } from './validation';
+import { HttpError } from '../api/route-utils';
 
 const SIG_LOCAL = 0x04034b50;
 const SIG_CENTRAL = 0x02014b50;

@@ -20,7 +20,7 @@ import {
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import type { StorageDriver, HeadInfo, PresignGetOptions } from './driver.js';
+import type { StorageDriver, HeadInfo, PresignGetOptions } from './driver';
 
 const PUT_TTL_SEC = 15 * 60; // 15-min presigned PUT (phase2 §2.11)
 const GET_TTL_SEC = 5 * 60;  // 5-min presigned GET (phase2 §2.2)
@@ -85,6 +85,7 @@ export class R2StorageDriver implements StorageDriver {
         size: Number(out.ContentLength ?? 0),
         contentType: out.ContentType,
         metadata: out.Metadata,
+        lastModified: out.LastModified?.toISOString(),
       };
     } catch (err: unknown) {
       if (isNotFound(err)) return null;
