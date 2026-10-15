@@ -5,6 +5,7 @@ import { getStorageDriver, keys, extForMimetype } from '@/lib/storage/driver';
 import { isAllowedUploadMimetype, stagedExtension, MAX_PHOTO_BYTES } from '@/lib/import/validation';
 import { isStorageBlocked, getStorageMeter } from '@/lib/api/meter';
 import { requireRateLimit } from '@/lib/ratelimit';
+import { idempotentCreate, readStashedResult, resolveClientOpId } from '@/lib/api/idempotency';
 import { randomUUID } from 'node:crypto';
 
 export const runtime = 'nodejs';
@@ -54,29 +55,69 @@ export const POST = handle(async (req: Request) => {
     return apiError('storage_blocked', 'batch does not fit in the remaining storage budget', 507);
   }
 
+  // A4: claim-first idempotency — the client already sends clientOpId (see
+  // lib/import/upload.ts) but the old code ignored it and minted a duplicate
+  // job per retry. A replay returns the SAME job_id and re-mints fresh
+  // presigned URLs for the SAME staged keys (the 15-min TTL means stored
+  // URLs go stale — only the keys are stashed).
+  const opId = resolveClientOpId(req, body);
   const jobId = randomUUID();
-  await sql()`INSERT INTO import_jobs (id, project_id, kind, status, total, checkpoint)
-    VALUES (${jobId}, ${body.project_id}, 'upload', 'queued', ${files.length},
-      ${JSON.stringify({ presigned_at: new Date().toISOString() })}::jsonb)`;
-
   const storage = await getStorageDriver();
-  const grants = [];
-  for (const f of files) {
-    const ext = stagedExtension(f.mimetype!);
-    const key = keys.upload(jobId, randomUUID(), ext);
-    const url = await storage.presignPut(key, f.mimetype!.toLowerCase(), 15 * 60);
-    grants.push({
-      key,
-      url,
-      expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-      sha256: f.sha256!.toLowerCase(),
-      mimetype: f.mimetype!.toLowerCase(),
-      filename: f.filename!,
-      // Local-driver hint: the client PUTs bytes to `url` with a matching
-      // Content-Type header (the signature pins it).
-      content_type: f.mimetype!.toLowerCase(),
-    });
-    void extForMimetype;
+
+  interface GrantSeed { key: string; sha256: string; mimetype: string; filename: string }
+  async function mintGrants(seeds: GrantSeed[]) {
+    const grants = [];
+    for (const f of seeds) {
+      const url = await storage.presignPut(f.key, f.mimetype, 15 * 60);
+      grants.push({
+        key: f.key,
+        url,
+        expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        sha256: f.sha256,
+        mimetype: f.mimetype,
+        filename: f.filename,
+        content_type: f.mimetype,
+      });
+    }
+    return grants;
   }
-  return ok({ job_id: jobId, grants }, 201);
+
+  const { result, replayed, clientOpId } = await idempotentCreate({
+    projectId: body.project_id,
+    opId,
+    kind: 'import.presign',
+    payload: { files: files.length },
+    create: async () => {
+      await sql()`INSERT INTO import_jobs (id, project_id, kind, status, total, checkpoint)
+        VALUES (${jobId}, ${body.project_id}, 'upload', 'queued', ${files.length},
+          ${JSON.stringify({ presigned_at: new Date().toISOString() })}::jsonb)`;
+      const seeds: GrantSeed[] = files.map((f) => ({
+        key: keys.upload(jobId, randomUUID(), stagedExtension(f.mimetype!)),
+        sha256: f.sha256!.toLowerCase(),
+        mimetype: f.mimetype!.toLowerCase(),
+        filename: f.filename!,
+      }));
+      void extForMimetype;
+      const grants = await mintGrants(seeds);
+      return { job_id: jobId, grants, seeds };
+    },
+    findPrior: async () => {
+      const stashed = await readStashedResult<{ job_id: string; seeds: GrantSeed[] }>(opId!);
+      if (!stashed?.job_id || !stashed?.seeds) return null;
+      const grants = await mintGrants(stashed.seeds);
+      return { job_id: stashed.job_id, grants, seeds: stashed.seeds };
+    },
+    // Stash the seeds (keys), not the URLs — replays re-mint fresh URLs.
+    toStash: (r) => ({ job_id: r.job_id, seeds: r.seeds }),
+  });
+  if (replayed) {
+    if (!result) {
+      // First attempt died after claiming but before finishing: the client
+      // must retry with a FRESH op id (wire-format rule 5).
+      return ok({ job_id: null, grants: [], replayed: true, clientOpId,
+        note: 'first attempt did not complete; retry with a fresh clientOpId' });
+    }
+    return ok({ job_id: result.job_id, grants: result.grants, replayed: true, clientOpId });
+  }
+  return ok({ job_id: result!.job_id, grants: result!.grants, ...(clientOpId ? { clientOpId } : {}) }, 201);
 });

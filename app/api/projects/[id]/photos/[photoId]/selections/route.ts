@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { handle, ok, parseJson, pagination, nextCursor, requireProject, HttpError } from '@/lib/api/route-utils';
 import { sql, tx, bumpRevQuery } from '@/lib/db/index';
+import { idempotentCreate, readStashedResult, resolveClientOpId } from '@/lib/api/idempotency';
 import { randomUUID } from 'node:crypto';
 
 export const runtime = 'nodejs';
@@ -65,27 +66,40 @@ export const POST = handle(async (req: Request, ctx: Ctx) => {
     if (!t.length) throw new HttpError(400, 'validation', 'template not found in this project');
   }
 
+  // A4: claim-first idempotency — a retried request returns the original
+  // selection instead of drawing a duplicate.
+  const opId = resolveClientOpId(req, body);
   const selId = randomUUID();
   const imageId = randomUUID();
   const qq = (text: string, params?: unknown[]) => ({ text, params });
-  await tx(() => {
-    const queries = [
-      qq(`INSERT INTO subjects (id, project_id, kind, template_id) VALUES ($1,$2,'selection',$3)`,
-        [selId, id, body.template_id ?? null]),
-      qq(`INSERT INTO images (id, width, height) VALUES ($1,$2,$3)`,
-        [imageId, Math.round(body.width!), Math.round(body.height!)]),
-      qq(`INSERT INTO selections (subject_id, photo_id, name, x, y, width, height, position)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [selId, photoId, (body.name ?? 'Selection').slice(0, 200),
-          Math.round(body.x!), Math.round(body.y!), Math.round(body.width!), Math.round(body.height!),
-          body.position ?? 0]),
-      bumpRevQuery(id),
-    ];
-    if (body.clientOpId) {
-      queries.push(qq(`INSERT INTO command_log (project_id, op_id, kind, payload) VALUES ($1,$2,'selection.create',$3::jsonb)
-        ON CONFLICT (op_id) DO NOTHING`, [id, body.clientOpId, JSON.stringify(body)]));
-    }
-    return queries;
+  const { result, replayed, clientOpId } = await idempotentCreate({
+    projectId: id,
+    opId,
+    kind: 'selection.create',
+    payload: { photo_id: photoId, x: body.x, y: body.y, width: body.width, height: body.height },
+    create: async () => {
+      await tx(() => [
+        qq(`INSERT INTO subjects (id, project_id, kind, template_id) VALUES ($1,$2,'selection',$3)`,
+          [selId, id, body.template_id ?? null]),
+        qq(`INSERT INTO images (id, width, height) VALUES ($1,$2,$3)`,
+          [imageId, Math.round(body.width!), Math.round(body.height!)]),
+        qq(`INSERT INTO selections (subject_id, photo_id, name, x, y, width, height, position)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [selId, photoId, (body.name ?? 'Selection').slice(0, 200),
+            Math.round(body.x!), Math.round(body.y!), Math.round(body.width!), Math.round(body.height!),
+            body.position ?? 0]),
+        bumpRevQuery(id),
+      ]);
+      return { selection_id: selId };
+    },
+    findPrior: async () => {
+      const stashed = await readStashedResult<{ selection_id: string }>(opId!);
+      return stashed?.selection_id ? { selection_id: stashed.selection_id } : null;
+    },
   });
-  return ok({ ...(await selectionJson(id, selId)), ...(body.clientOpId ? { clientOpId: body.clientOpId } : {}) }, 201);
+  if (replayed) {
+    const prior = result?.selection_id ? await selectionJson(id, result.selection_id).catch(() => null) : null;
+    return ok({ ...(prior ?? {}), replayed: true, clientOpId });
+  }
+  return ok({ ...(await selectionJson(id, selId)), ...(clientOpId ? { clientOpId } : {}) }, 201);
 });

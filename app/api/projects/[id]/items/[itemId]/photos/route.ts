@@ -3,6 +3,7 @@ import { handle, ok, parseJson, pagination, nextCursor, requireProject, HttpErro
 import { sql } from '@/lib/db/index';
 import { createPhotoRows, type PhotoEntry } from '@/lib/import/photos';
 import { getPhotoJson } from '@/lib/api/shapes';
+import { idempotentCreate, readStashedResult, resolveClientOpId } from '@/lib/api/idempotency';
 import { isAllowedUploadMimetype } from '@/lib/import/validation';
 
 export const runtime = 'nodejs';
@@ -68,15 +69,45 @@ export const POST = handle(async (req: Request, ctx: Ctx) => {
     position: body.position,
     templateId: body.template_id ?? null,
   };
+  // A4: claim-first idempotency — the old code parsed clientOpId but ignored
+  // it, so a retried register created a duplicate photo row. A replay
+  // returns the original photo (createPhotoRows' checksum dedupe is the
+  // second line of defense).
+  const opId = resolveClientOpId(req, body);
   const { randomUUID } = await import('node:crypto');
   const jobId = randomUUID();
-  await sql()`INSERT INTO import_jobs (id, project_id, kind, status, total)
-    VALUES (${jobId}, ${id}, 'upload', 'running', 1)`;
-  const [created] = await createPhotoRows(id, jobId, [entry], {
-    itemId,
-    duplicatePolicy: body.duplicate_policy ?? 'skip',
+  const { result, replayed, clientOpId } = await idempotentCreate({
+    projectId: id,
+    opId,
+    kind: 'photo.register',
+    payload: { item_id: itemId, sha256: entry.checksumSha256.slice(0, 16) },
+    create: async () => {
+      await sql()`INSERT INTO import_jobs (id, project_id, kind, status, total)
+        VALUES (${jobId}, ${id}, 'upload', 'running', 1)`;
+      const [created] = await createPhotoRows(id, jobId, [entry], {
+        itemId,
+        duplicatePolicy: body.duplicate_policy ?? 'skip',
+      });
+      const photo = await getPhotoJson(id, created.subjectId);
+      return { photo, dedupe: created.dedupe, job_id: jobId, subject_id: created.subjectId };
+    },
+    findPrior: async () => {
+      const stashed = await readStashedResult<{ subject_id: string; job_id: string; dedupe: string }>(opId!);
+      if (!stashed?.subject_id) return null;
+      const photo = await getPhotoJson(id, stashed.subject_id).catch(() => null);
+      return photo ? { photo, dedupe: stashed.dedupe, job_id: stashed.job_id, subject_id: stashed.subject_id } : null;
+    },
+    toStash: (r) => ({ subject_id: r.subject_id, job_id: r.job_id, dedupe: r.dedupe }),
   });
-  const photo = await getPhotoJson(id, created.subjectId);
   const rev = await sql()`SELECT rev FROM projects WHERE id = ${id}`;
-  return ok({ photo, dedupe: created.dedupe, job_id: jobId, rev: Number(rev[0]['rev']) }, 201);
+  if (replayed) {
+    if (!result) {
+      return ok({ photo: null, replayed: true, clientOpId, rev: Number(rev[0]['rev']),
+        note: 'first attempt did not complete; retry with a fresh clientOpId' });
+    }
+    return ok({ photo: result.photo, dedupe: result.dedupe, job_id: result.job_id,
+      replayed: true, clientOpId, rev: Number(rev[0]['rev']) });
+  }
+  return ok({ photo: result!.photo, dedupe: result!.dedupe, job_id: jobId,
+    rev: Number(rev[0]['rev']), ...(clientOpId ? { clientOpId } : {}) }, 201);
 });

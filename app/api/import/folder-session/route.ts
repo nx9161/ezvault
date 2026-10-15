@@ -5,6 +5,7 @@ import { getStorageDriver, keys } from '@/lib/storage/driver';
 import { isAllowedUploadMimetype, stagedExtension, MAX_PHOTO_BYTES } from '@/lib/import/validation';
 import { isStorageBlocked, getStorageMeter } from '@/lib/api/meter';
 import { requireRateLimit } from '@/lib/ratelimit';
+import { idempotentCreate, readStashedResult, resolveClientOpId } from '@/lib/api/idempotency';
 import { randomUUID } from 'node:crypto';
 
 export const runtime = 'nodejs';
@@ -92,37 +93,78 @@ export const POST = handle(async (req: Request) => {
     if (parts.length) await ensureDir(parts);
   }
 
-  const jobId = randomUUID();
-  queries.push(qq(`INSERT INTO import_jobs (id, project_id, kind, status, total, checkpoint)
-    VALUES ($1,$2,'folder','queued',${files.length},
-      ${JSON.stringify({ dir_lists: Object.fromEntries(listCache) })}::jsonb)`,
-    [jobId, body.project_id]));
+  // List inserts commit in their own txn (name-deduped, safe to re-run);
+  // the job row is created INSIDE the idempotency gate below.
   queries.push(bumpRevQuery(body.project_id));
   await tx(() => queries);
 
+  // A4: claim-first idempotency — the old code parsed clientOpId but ignored
+  // it, minting a duplicate job + grants per retry. A replay returns the SAME
+  // job_id with freshly minted URLs for the SAME staged keys.
+  const opId = resolveClientOpId(req, body);
   const storage = await getStorageDriver();
-  const grants = [];
-  for (const f of files) {
-    const p = norm(f.path!);
-    const mimetype = f.mimetype!.toLowerCase();
-    const key = keys.upload(jobId, randomUUID(), stagedExtension(mimetype));
-    const url = await storage.presignPut(key, mimetype, 15 * 60);
-    const dirParts = p.split('/').slice(0, -1);
-    grants.push({
-      path: p,
-      key,
-      url,
-      expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-      content_type: mimetype,
-      sha256: f.sha256!.toLowerCase(),
-      list_id: dirParts.length ? (listCache.get(dirParts.join('/')) ?? null) : null,
-    });
+  const mapping = Object.fromEntries([...listCache.entries()].map(([k, v]) => [k, { list_id: v }]));
+  interface FolderSeed { path: string; key: string; mimetype: string; sha256: string; list_id: string | null }
+  async function mintFolderGrants(seeds: FolderSeed[]) {
+    const grants = [];
+    for (const s of seeds) {
+      const url = await storage.presignPut(s.key, s.mimetype, 15 * 60);
+      grants.push({
+        path: s.path, key: s.key, url,
+        expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        content_type: s.mimetype, sha256: s.sha256, list_id: s.list_id,
+      });
+    }
+    return grants;
   }
+  const jobId = randomUUID();
+  const { result, replayed, clientOpId } = await idempotentCreate({
+    projectId: body.project_id,
+    opId,
+    kind: 'import.folder-session',
+    payload: { files: files.length },
+    create: async () => {
+      await sql()`INSERT INTO import_jobs (id, project_id, kind, status, total, checkpoint)
+        VALUES (${jobId}, ${body.project_id}, 'folder', 'queued', ${files.length},
+          ${JSON.stringify({ dir_lists: Object.fromEntries(listCache) })}::jsonb)`;
+      const seeds: FolderSeed[] = files.map((f) => {
+        const p = norm(f.path!);
+        const mimetype = f.mimetype!.toLowerCase();
+        const dirParts = p.split('/').slice(0, -1);
+        return {
+          path: p,
+          key: keys.upload(jobId, randomUUID(), stagedExtension(mimetype)),
+          mimetype,
+          sha256: f.sha256!.toLowerCase(),
+          list_id: dirParts.length ? (listCache.get(dirParts.join('/')) ?? null) : null,
+        };
+      });
+      const grants = await mintFolderGrants(seeds);
+      return { job_id: jobId, mapping, grants, seeds };
+    },
+    findPrior: async () => {
+      const stashed = await readStashedResult<{ job_id: string; mapping: unknown; seeds: FolderSeed[] }>(opId!);
+      if (!stashed?.job_id || !stashed?.seeds) return null;
+      const grants = await mintFolderGrants(stashed.seeds);
+      return { job_id: stashed.job_id, mapping: stashed.mapping, grants, seeds: stashed.seeds };
+    },
+    toStash: (r) => ({ job_id: r.job_id, mapping: r.mapping, seeds: r.seeds }),
+  });
   const rev = await sql()`SELECT rev FROM projects WHERE id = ${body.project_id}`;
+  if (replayed) {
+    if (!result) {
+      return ok({ job_id: null, mapping: {}, grants: [], replayed: true, clientOpId,
+        rev: Number(rev[0]['rev']),
+        note: 'first attempt did not complete; retry with a fresh clientOpId' });
+    }
+    return ok({ job_id: result.job_id, mapping: result.mapping, grants: result.grants,
+      rev: Number(rev[0]['rev']), replayed: true, clientOpId });
+  }
   return ok({
-    job_id: jobId,
-    mapping: Object.fromEntries([...listCache.entries()].map(([k, v]) => [k, { list_id: v }])),
-    grants,
+    job_id: result!.job_id,
+    mapping: result!.mapping,
+    grants: result!.grants,
     rev: Number(rev[0]['rev']),
+    ...(clientOpId ? { clientOpId } : {}),
   }, 201);
 });

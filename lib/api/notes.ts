@@ -4,6 +4,7 @@ import { handle, ok, parseJson, pagination, nextCursor, requireProject, HttpErro
 import { sql, tx, bumpRevQuery } from '@/lib/db/index';
 import { sanitizeTiptapDoc } from '@/lib/notes/sanitize';
 import { tiptapToText } from '@/lib/export/jsonld.js';
+import { idempotentCreate, readStashedResult, resolveClientOpId } from '@/lib/api/idempotency';
 import { randomUUID } from 'node:crypto';
 
 export const runtime = 'nodejs';
@@ -46,27 +47,43 @@ export async function createNote(projectId: string, subjectId: string, req: Requ
     throw new HttpError(400, 'validation', 'note state could not be sanitized');
   }
   const text = (typeof body.text === 'string' && body.text) || tiptapToText(sanitized);
+  // A4: claim-first idempotency — a retried request returns the original
+  // note instead of saving a duplicate.
+  const opId = resolveClientOpId(req, body);
   const noteId = randomUUID();
   const qq = (t: string, p?: unknown[]) => ({ text: t, params: p });
-  await tx(() => {
-    const queries = [
-      qq(`INSERT INTO notes (id, subject_id, text, state, language) VALUES ($1,$2,$3,$4::jsonb,$5)`,
-        [noteId, subjectId, text.slice(0, 100000), JSON.stringify(sanitized), body.language ?? null]),
-      bumpRevQuery(projectId),
-    ];
-    if (body.clientOpId) {
-      queries.push(qq(`INSERT INTO command_log (project_id, op_id, kind, payload) VALUES ($1,$2,'note.create',$3::jsonb)
-        ON CONFLICT (op_id) DO NOTHING`, [projectId, body.clientOpId, JSON.stringify({ subject_id: subjectId })]));
-    }
-    return queries;
+  const { result, replayed, clientOpId } = await idempotentCreate({
+    projectId,
+    opId,
+    kind: 'note.create',
+    payload: { subject_id: subjectId },
+    create: async () => {
+      await tx(() => [
+        qq(`INSERT INTO notes (id, subject_id, text, state, language) VALUES ($1,$2,$3,$4::jsonb,$5)`,
+          [noteId, subjectId, text.slice(0, 100000), JSON.stringify(sanitized), body.language ?? null]),
+        bumpRevQuery(projectId),
+      ]);
+      return { note_id: noteId };
+    },
+    findPrior: async () => {
+      const stashed = await readStashedResult<{ note_id: string }>(opId!);
+      return stashed?.note_id ? { note_id: stashed.note_id } : null;
+    },
   });
-  const rows = await sql()`SELECT id, subject_id, text, state, language, created_at, updated_at FROM notes WHERE id = ${noteId}`;
+  const readId = replayed ? (result?.note_id ?? noteId) : noteId;
+  const rows = await sql()`SELECT id, subject_id, text, state, language, created_at, updated_at FROM notes WHERE id = ${readId}`;
   const rev = await sql()`SELECT rev FROM projects WHERE id = ${projectId}`;
+  if (replayed) {
+    return ok({
+      ...rows[0], rev: Number(rev[0]['rev']), sanitized_links_stripped: stripped,
+      replayed: true, clientOpId,
+    });
+  }
   return ok({
     ...rows[0],
     rev: Number(rev[0]['rev']),
     sanitized_links_stripped: stripped,
-    ...(body.clientOpId ? { clientOpId: body.clientOpId } : {}),
+    ...(clientOpId ? { clientOpId } : {}),
   }, 201);
 }
 

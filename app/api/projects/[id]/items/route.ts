@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { handle, ok, parseJson, pagination, nextCursor, requireProject, HttpError } from '@/lib/api/route-utils';
 import { sql, tx, queryRaw, bumpRevQuery } from '@/lib/db/index';
+import { idempotentCreate, readStashedResult, resolveClientOpId } from '@/lib/api/idempotency';
 import { randomUUID } from 'node:crypto';
 
 export const runtime = 'nodejs';
@@ -81,36 +82,46 @@ export const POST = handle(async (req: Request, ctx: Ctx) => {
     const l = await sql()`SELECT id FROM lists WHERE id = ${body.list_id} AND project_id = ${id}`;
     if (!l.length) throw new HttpError(400, 'validation', 'list not found in this project');
   }
-  if (body.clientOpId) {
-    const prior = await sql()`SELECT s.id AS subject_id FROM subjects s JOIN command_log c ON c.project_id = s.project_id
-      WHERE c.op_id = ${body.clientOpId} AND s.project_id = ${id} LIMIT 1`;
-    if (prior.length) {
-      const rev = await sql()`SELECT rev FROM projects WHERE id = ${id}`;
-      return ok({ subject_id: prior[0]['subject_id'], replayed: true, rev: Number(rev[0]['rev']), clientOpId: body.clientOpId });
-    }
-  }
-
+  // A4: claim-first idempotency — the claim runs BEFORE any side effect, so
+  // a retried request can never create a second item (fixes the old
+  // check-then-act race, and the old replay lookup that could return an
+  // arbitrary subject of the project instead of the created one).
+  const opId = resolveClientOpId(req, body);
   const itemId = randomUUID();
   const qq = (text: string, params?: unknown[]): { text: string; params?: unknown[] } => ({ text, params });
-  const results = await tx(() => {
-    const queries = [
-      qq(`INSERT INTO subjects (id, project_id, kind, template_id) VALUES ($1,$2,'item',$3)`,
-        [itemId, id, body.template_id ?? null]),
-      qq(`INSERT INTO items (subject_id) VALUES ($1)`, [itemId]),
-    ];
-    if (body.list_id) {
-      queries.push(qq(`INSERT INTO list_items (list_id, item_id, position)
-        VALUES ($1,$2,COALESCE($3, (SELECT COALESCE(MAX(position)+1,0) FROM list_items WHERE list_id=$1)))`,
-        [body.list_id, itemId, body.position ?? null]));
-    }
-    queries.push(bumpRevQuery(id));
-    if (body.clientOpId) {
-      queries.push(qq(`INSERT INTO command_log (project_id, op_id, kind, payload) VALUES ($1,$2,'item.create',$3::jsonb)
-        ON CONFLICT (op_id) DO NOTHING`, [id, body.clientOpId, JSON.stringify(body)]));
-    }
-    return queries;
+  const { result, replayed, clientOpId } = await idempotentCreate({
+    projectId: id,
+    opId,
+    kind: 'item.create',
+    payload: { template_id: body.template_id ?? null, list_id: body.list_id ?? null },
+    create: async () => {
+      await tx(() => {
+        const queries = [
+          qq(`INSERT INTO subjects (id, project_id, kind, template_id) VALUES ($1,$2,'item',$3)`,
+            [itemId, id, body.template_id ?? null]),
+          qq(`INSERT INTO items (subject_id) VALUES ($1)`, [itemId]),
+        ];
+        if (body.list_id) {
+          queries.push(qq(`INSERT INTO list_items (list_id, item_id, position)
+            VALUES ($1,$2,COALESCE($3, (SELECT COALESCE(MAX(position)+1,0) FROM list_items WHERE list_id=$1)))`,
+            [body.list_id, itemId, body.position ?? null]));
+        }
+        queries.push(bumpRevQuery(id));
+        return queries;
+      });
+      return { subject_id: itemId };
+    },
+    findPrior: async () => {
+      const stashed = await readStashedResult<{ subject_id: string }>(opId!);
+      return stashed?.subject_id ? { subject_id: stashed.subject_id } : null;
+    },
   });
-  void results;
   const rev = await sql()`SELECT rev FROM projects WHERE id = ${id}`;
-  return ok({ subject_id: itemId, rev: Number(rev[0]['rev']), ...(body.clientOpId ? { clientOpId: body.clientOpId } : {}) }, 201);
+  if (replayed) {
+    return ok({
+      subject_id: result?.subject_id ?? null, replayed: true,
+      rev: Number(rev[0]['rev']), clientOpId,
+    });
+  }
+  return ok({ subject_id: itemId, rev: Number(rev[0]['rev']), ...(clientOpId ? { clientOpId } : {}) }, 201);
 });

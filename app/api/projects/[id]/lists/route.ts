@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { handle, ok, parseJson, requireProject, HttpError } from '@/lib/api/route-utils';
 import { sql, tx, bumpRevQuery } from '@/lib/db/index';
+import { idempotentCreate, readStashedResult, resolveClientOpId } from '@/lib/api/idempotency';
 import { randomUUID } from 'node:crypto';
 import type { ListNode } from '@/lib/types';
 
@@ -55,21 +56,37 @@ export const POST = handle(async (req: Request, ctx: Ctx) => {
   if (body.color !== undefined && body.color !== null && !/^#[0-9a-fA-F]{6}$/.test(body.color)) {
     throw new HttpError(400, 'validation', 'color must be #rrggbb');
   }
+  // A4: claim-first idempotency — a retried request returns the original
+  // list instead of minting a duplicate.
+  const opId = resolveClientOpId(req, body);
   const listId = randomUUID();
   const qq = (text: string, params?: unknown[]) => ({ text, params });
-  await tx(() => {
-    const queries = [
-      qq(`INSERT INTO lists (id, project_id, name, parent_list_id, position, color)
-          VALUES ($1,$2,$3,$4,$5,$6)`,
-        [listId, id, name.slice(0, 200), body.parent_list_id ?? null, body.position ?? 0, body.color ?? null]),
-      bumpRevQuery(id),
-    ];
-    if (body.clientOpId) {
-      queries.push(qq(`INSERT INTO command_log (project_id, op_id, kind, payload) VALUES ($1,$2,'list.create',$3::jsonb)
-        ON CONFLICT (op_id) DO NOTHING`, [id, body.clientOpId, JSON.stringify({ name })]));
-    }
-    return queries;
+  const { result, replayed, clientOpId } = await idempotentCreate<{
+    list_id: string; row?: Record<string, unknown> | null;
+  }>({
+    projectId: id,
+    opId,
+    kind: 'list.create',
+    payload: { name: name.slice(0, 200) },
+    create: async () => {
+      await tx(() => [
+        qq(`INSERT INTO lists (id, project_id, name, parent_list_id, position, color)
+            VALUES ($1,$2,$3,$4,$5,$6)`,
+          [listId, id, name.slice(0, 200), body.parent_list_id ?? null, body.position ?? 0, body.color ?? null]),
+        bumpRevQuery(id),
+      ]);
+      return { list_id: listId };
+    },
+    findPrior: async () => {
+      const stashed = await readStashedResult<{ list_id: string }>(opId!);
+      if (!stashed?.list_id) return null;
+      const rows = await sql()`SELECT * FROM lists WHERE id = ${stashed.list_id} AND project_id = ${id}`;
+      return rows.length ? { list_id: stashed.list_id, row: rows[0] } : null;
+    },
   });
+  if (replayed) {
+    return ok({ ...(result?.row ?? {}), replayed: true, clientOpId });
+  }
   const rows = await sql()`SELECT * FROM lists WHERE id = ${listId}`;
-  return ok({ ...rows[0], ...(body.clientOpId ? { clientOpId: body.clientOpId } : {}) }, 201);
+  return ok({ ...rows[0], ...(clientOpId ? { clientOpId } : {}) }, 201);
 });

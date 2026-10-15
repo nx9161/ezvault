@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { handle, ok, parseJson, pagination, nextCursor, HttpError } from '@/lib/api/route-utils';
 import { sql, tx } from '@/lib/db/index';
+import { idempotentCreate, readStashedResult, resolveClientOpId } from '@/lib/api/idempotency';
 import { randomUUID } from 'node:crypto';
 
 export const runtime = 'nodejs';
@@ -31,28 +32,39 @@ export const POST = handle(async (req: Request) => {
     throw new HttpError(400, 'validation', 'invalid notes_export_format');
   }
 
-  // Idempotent replay: an op_id already claimed returns the original project.
-  const opId = body.clientOpId;
-  if (opId) {
-    const prior = await sql()`SELECT p.* FROM projects p
-      JOIN command_log c ON c.project_id = p.id WHERE c.op_id = ${opId} LIMIT 1`;
-    if (prior.length) {
-      const p = prior[0] as { rev: number };
-      return ok({ ...prior[0], replayed: true, rev: Number(p.rev), clientOpId: opId });
-    }
-  }
-
+  // A4: claim-first idempotency via the canonical helper (replaces the old
+  // check-then-act replay lookup, which raced under concurrent retries).
+  const opId = resolveClientOpId(req, body);
   const id = randomUUID();
-  const rows = await tx((q) => [
-    q(`INSERT INTO projects (id, name, duplicate_policy, notes_export_format)
-       VALUES ($1,$2,$3,$4) RETURNING *`,
-      [id, name.slice(0, 200), body.duplicate_policy ?? 'skip', body.notes_export_format ?? 'html']),
-    q(`INSERT INTO storage_counters (project_id) VALUES ($1) ON CONFLICT DO NOTHING`, [id]),
-    ...(opId
-      ? [q(`INSERT INTO command_log (project_id, op_id, kind, payload) VALUES ($1,$2,'project.create',$3::jsonb)
-            ON CONFLICT (op_id) DO NOTHING`, [id, opId, JSON.stringify(body)])]
-      : []),
-  ]);
-  const project = (rows[0] as unknown[])[0] as Record<string, unknown>;
-  return ok({ ...project, ...(opId ? { clientOpId: opId } : {}) }, 201);
+  const { result, replayed, clientOpId } = await idempotentCreate({
+    projectId: id,
+    opId,
+    kind: 'project.create',
+    payload: { name: name.slice(0, 200) },
+    create: async () => {
+      const rows = await tx((q) => [
+        q(`INSERT INTO projects (id, name, duplicate_policy, notes_export_format)
+           VALUES ($1,$2,$3,$4) RETURNING *`,
+          [id, name.slice(0, 200), body.duplicate_policy ?? 'skip', body.notes_export_format ?? 'html']),
+        q(`INSERT INTO storage_counters (project_id) VALUES ($1) ON CONFLICT DO NOTHING`, [id]),
+      ]);
+      const project = (rows[0] as unknown[])[0] as Record<string, unknown>;
+      return { project, project_id: id };
+    },
+    findPrior: async () => {
+      const stashed = await readStashedResult<{ project_id: string }>(opId!);
+      if (!stashed?.project_id) return null;
+      const rows = await sql()`SELECT * FROM projects WHERE id = ${stashed.project_id}`;
+      return rows.length ? { project: rows[0], project_id: stashed.project_id } : null;
+    },
+  });
+  if (replayed) {
+    if (!result) {
+      return ok({ replayed: true, clientOpId,
+        note: 'first attempt did not complete; retry with a fresh clientOpId' });
+    }
+    const p = result.project as { rev: number };
+    return ok({ ...result.project, replayed: true, rev: Number(p.rev), clientOpId });
+  }
+  return ok({ ...result!.project, ...(clientOpId ? { clientOpId } : {}) }, 201);
 });
