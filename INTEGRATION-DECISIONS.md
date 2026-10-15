@@ -107,7 +107,7 @@ i18n keys (title/placeholder/actions/recent/searchResults/noResults).
 
 ## 3. driver.js@1.9.0 — onboarding tour (Wave 1, LAST)
 
-**Status:** ACCEPTED · landed 2026-10-15 · commit `TBD`
+**Status:** ACCEPTED · landed 2026-10-15 · commit `fb43dea`
 
 **What it is:** framework-agnostic product-tour library (Kamran Ahmed) —
 highlight + popover steps over DOM anchors.
