@@ -308,7 +308,7 @@ table.ez-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .ez-table img.ez-row-thumb { width: 48px; height: 36px; object-fit: cover; border-radius: 4px; display: block; }
 /* Empty / loading / error states */
 .ez-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 48px 24px; text-align: center; color: var(--ink-2); height: 100%; }
-.ez-state h2 { font-size: 20px; color: var(--ink); margin: 0; }
+.ez-state h2 { font-family: var(--font-notes); font-weight: 400; font-size: 23px; color: var(--ink); margin: 0; }
 .ez-state p { max-width: 420px; margin: 0; }
 .ez-skeleton { border-radius: var(--radius-md); background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 50%, var(--surface-2) 75%); background-size: 200% 100%; animation: ez-shimmer 1.4s infinite; }
 @keyframes ez-shimmer { to { background-position: -200% 0; } }

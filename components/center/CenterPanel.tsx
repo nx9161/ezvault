@@ -34,6 +34,7 @@ import { useOpContext } from "@/components/sidebar/Sidebar";
 import { Menu, MenuItem, MenuLabel } from "@/components/ui/Menu";
 import { ErrorCard, SkeletonCards, SkeletonRows } from "@/components/ui/Feedback";
 import { CheckIcon, SelectionCountIcon, NoteIcon } from "@/components/ui/icons";
+import { EmptyArt } from "@/components/ui/EmptyArt";
 import { renderSnippet } from "@/lib/search-snippet";
 import type { Item, Tag } from "@/lib/api/types";
 import TrashView from "@/components/trash/TrashView";
@@ -830,6 +831,7 @@ export default function CenterPanel({ projectId }: { projectId: string }) {
         <ErrorCard what={t("breadcrumbAll")} onRetry={() => mutate()} />
       ) : emptyLibrary ? (
         <div className="ez-state">
+          <EmptyArt variant="library" />
           <h2>{t("emptyLibraryTitle")}</h2>
           <p>{t("emptyLibraryBody")}</p>
           <div style={{ display: "flex", gap: 8 }}>
@@ -843,6 +845,7 @@ export default function CenterPanel({ projectId }: { projectId: string }) {
         </div>
       ) : items.length === 0 ? (
         <div className="ez-state">
+          <EmptyArt variant="list" />
           <h2>{t("emptyListTitle")}</h2>
           <p>{t("emptyListBody")}</p>
         </div>

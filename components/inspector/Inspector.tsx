@@ -13,6 +13,7 @@ import { runCommand, trashSubjectsOp } from "@/lib/commands/ops";
 import { useOpContext } from "@/components/sidebar/Sidebar";
 import { ErrorCard, SkeletonRows } from "@/components/ui/Feedback";
 import { ExportIcon, TrashIcon, CloseIcon } from "@/components/ui/icons";
+import { EmptyArt } from "@/components/ui/EmptyArt";
 import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
 import PhotoViewer from "./PhotoViewer";
 import MetadataForm from "./MetadataForm";
@@ -288,6 +289,7 @@ export default function Inspector({ projectId }: { projectId: string }) {
       >
         {!activeItemId && bulkIds.length === 0 ? (
           <div className="ez-state">
+            <EmptyArt variant="inspector" />
             <h2>{t("emptyTitle")}</h2>
             <p>{t("emptyBody")}</p>
           </div>

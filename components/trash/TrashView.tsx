@@ -12,6 +12,7 @@ import { runCommand, restoreTrashOp, emptyTrashOp } from "@/lib/commands/ops";
 import { useOpContext } from "@/components/sidebar/Sidebar";
 import { ConfirmDialog } from "@/components/ui/Dialog";
 import { ErrorCard, SkeletonRows } from "@/components/ui/Feedback";
+import { EmptyArt } from "@/components/ui/EmptyArt";
 
 export default function TrashView({ projectId }: { projectId: string }) {
   const t = useTranslations("trash");
@@ -73,6 +74,7 @@ export default function TrashView({ projectId }: { projectId: string }) {
           <ErrorCard what={t("title")} onRetry={() => mutate()} />
         ) : entries.length === 0 ? (
           <div className="ez-state">
+            <EmptyArt variant="trash" />
             <p>{t("emptyState")}</p>
           </div>
         ) : (
