@@ -20,6 +20,7 @@ import StatusBar from "@/components/statusbar/StatusBar";
 import CrossTabBanner from "@/components/crosstab/CrossTabBanner";
 import ShortcutsOverlay from "@/components/shortcuts/ShortcutsOverlay";
 import { RegisteredHotkeys } from "@/components/shortcuts/useRegisteredHotkeys";
+import { PaletteLauncher } from "@/components/palette/PaletteLauncher";
 import { Toasts } from "@/components/ui/Toasts";
 import { Menu, MenuItem, MenuSeparator } from "@/components/ui/Menu";
 import ImportDialog from "@/components/importer/ImportDialog";
@@ -258,6 +259,7 @@ export default function WorkspaceClient({ projectId }: { projectId: string }) {
   return (
     <div className="ez-app">
       <RegisteredHotkeys projectId={projectId} ctx={ctx} />
+      <PaletteLauncher projectId={projectId} opCtx={ctx} />
       <TopBar projectId={projectId} />
       <CrossTabBanner projectId={projectId} />
       <MeterBanners projectId={projectId} />

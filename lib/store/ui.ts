@@ -95,6 +95,10 @@ interface UiState {
   setSidebarOpen: (b: boolean) => void;
   setInspectorOpen: (b: boolean) => void;
 
+  // --- command palette (D-INTa; opened via mod+k from the hotkey registry) ---
+  paletteOpen: boolean;
+  setPaletteOpen: (b: boolean) => void;
+
   // --- toasts ---
   toasts: Toast[];
   pushToast: (t: Omit<Toast, "id">) => void;
@@ -224,6 +228,8 @@ export const useUiStore = create<UiState>()(
         setMobileNav: (mobileNav) => set({ mobileNav }),
         setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
         setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
+        paletteOpen: false,
+        setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
 
         toasts: [],
         pushToast: (t) =>

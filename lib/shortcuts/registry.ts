@@ -46,7 +46,8 @@ export interface HotkeyEntry {
 
 function closeTopmost() {
   const ui = useUiStore.getState();
-  if (ui.shortcutsOpen) ui.setShortcutsOpen(false);
+  if (ui.paletteOpen) ui.setPaletteOpen(false);
+  else if (ui.shortcutsOpen) ui.setShortcutsOpen(false);
   else if (ui.importOpen) ui.setImportOpen(false);
   else if (ui.tpyOpen) ui.setTpyOpen(false);
   else if (ui.inspectorOpen) ui.setInspectorOpen(false);
@@ -86,15 +87,15 @@ export const HOTKEY_REGISTRY: HotkeyEntry[] = [
     run: () => useUiStore.getState().setImportOpen(true),
   },
   {
-    id: "focusSearch",
+    id: "palette",
     keys: "mod+k",
     scope: "global",
     group: "general",
-    labelKey: "focusSearch",
+    labelKey: "palette",
     hint: "Ctrl/⌘ K",
-    // NOTE (D-INTa): the palette supersedes this binding; it is rebound to
-    // open the palette when cmdk lands. #ez-global-search stays as fallback.
-    run: () => document.getElementById("ez-global-search")?.focus(),
+    // D-INTa: the palette supersedes mod+k-focuses-search; the
+    // #ez-global-search input keeps working standalone as the fallback.
+    run: () => useUiStore.getState().setPaletteOpen(true),
   },
   {
     id: "undo",
