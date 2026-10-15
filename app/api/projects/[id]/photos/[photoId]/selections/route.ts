@@ -9,14 +9,7 @@ export const maxDuration = 300;
 
 type Ctx = { params: Promise<{ id: string; photoId: string }> };
 
-async function selectionJson(projectId: string, selectionId: string) {
-  const rows = await sql()`SELECT s.id AS subject_id, s.project_id, s.template_id,
-      sel.photo_id, sel.name, sel.x, sel.y, sel.width, sel.height, sel.position,
-      (SELECT COUNT(*)::int FROM notes n WHERE n.subject_id = sel.subject_id AND n.deleted_at IS NULL) AS note_count
-    FROM selections sel JOIN subjects s ON s.id = sel.subject_id
-    WHERE s.project_id = ${projectId} AND sel.subject_id = ${selectionId}`;
-  if (!rows.length) throw new HttpError(404, 'not_found', 'selection not found');
-  const r = rows[0];
+function selectionRowToJson(r: Record<string, unknown>) {
   return {
     subject_id: r['subject_id'], project_id: r['project_id'], kind: 'selection',
     photo_id: r['photo_id'], name: r['name'],
@@ -26,17 +19,34 @@ async function selectionJson(projectId: string, selectionId: string) {
   };
 }
 
+async function selectionJson(projectId: string, selectionId: string) {
+  const rows = await sql()`SELECT s.id AS subject_id, s.project_id, s.template_id,
+      sel.photo_id, sel.name, sel.x, sel.y, sel.width, sel.height, sel.position,
+      (SELECT COUNT(*)::int FROM notes n WHERE n.subject_id = sel.subject_id AND n.deleted_at IS NULL) AS note_count
+    FROM selections sel JOIN subjects s ON s.id = sel.subject_id
+    WHERE s.project_id = ${projectId} AND sel.subject_id = ${selectionId}`;
+  if (!rows.length) throw new HttpError(404, 'not_found', 'selection not found');
+  return selectionRowToJson(rows[0]);
+}
+
 export const GET = handle(async (req: Request, ctx: Ctx) => {
   const { id, photoId } = await ctx.params;
   await requireProject(id);
   const url = new URL(req.url);
   const { limit, offset } = pagination(url);
-  const rows = await sql()`SELECT sel.subject_id FROM selections sel JOIN subjects s ON s.id = sel.subject_id
-    WHERE s.project_id = ${id} AND sel.photo_id = ${photoId} ORDER BY sel.position LIMIT ${limit} OFFSET ${offset}`;
+  // A2: single grouped query instead of N sequential selectionJson() loads.
+  const rows = await sql()`SELECT s.id AS subject_id, s.project_id, s.template_id,
+      sel.photo_id, sel.name, sel.x, sel.y, sel.width, sel.height, sel.position,
+      COUNT(n.id)::int AS note_count
+    FROM selections sel JOIN subjects s ON s.id = sel.subject_id
+    LEFT JOIN notes n ON n.subject_id = sel.subject_id AND n.deleted_at IS NULL
+    WHERE s.project_id = ${id} AND sel.photo_id = ${photoId}
+    GROUP BY s.id, s.project_id, s.template_id,
+      sel.photo_id, sel.name, sel.x, sel.y, sel.width, sel.height, sel.position
+    ORDER BY sel.position LIMIT ${limit} OFFSET ${offset}`;
   const total = await sql()`SELECT COUNT(*)::int AS c FROM selections sel JOIN subjects s ON s.id = sel.subject_id
     WHERE s.project_id = ${id} AND sel.photo_id = ${photoId}`;
-  const items = [];
-  for (const r of rows) items.push(await selectionJson(id, r['subject_id'] as string));
+  const items = rows.map(selectionRowToJson);
   return ok({
     items, total: (total[0]['c'] as number),
     ...(nextCursor(offset, limit, rows.length) ? { nextCursor: nextCursor(offset, limit, rows.length) } : {}),

@@ -52,7 +52,11 @@ export async function getPhotoJson(projectId: string, photoSubjectId: string): P
     JOIN images i ON i.id = p.image_id
     WHERE s.project_id = ${projectId} AND p.subject_id = ${photoSubjectId}`;
   if (!rows.length) throw new HttpError(404, 'not_found', 'photo not found');
-  const r = rows[0];
+  return photoRowToJson(rows[0]);
+}
+
+/** Map one joined photo row to its API shape. */
+function photoRowToJson(r: Record<string, unknown>): PhotoJson {
   return {
     subject_id: r['subject_id'] as string,
     project_id: r['project_id'] as string,
@@ -83,6 +87,35 @@ export async function getPhotoJson(projectId: string, photoSubjectId: string): P
     },
     created_at: r['created_at'] as string,
   };
+}
+
+/**
+ * A2: batched photo JSON for grid endpoints — ONE query for N photos
+ * instead of N sequential getPhotoJson() round trips. Returns rows in input
+ * order; throws 404 when any id is missing (same as the single loader).
+ */
+export async function getPhotoJsonBatch(
+  projectId: string,
+  photoSubjectIds: string[],
+): Promise<PhotoJson[]> {
+  if (!photoSubjectIds.length) return [];
+  const rows = await sql()`
+    SELECT s.id AS subject_id, s.project_id, s.template_id,
+           p.item_id, p.position, p.r2_key, p.thumb_r2_key, p.missing_original,
+           p.original_filename, p.mimetype, p.checksum_sha256, p.tpy_checksum_md5,
+           p.size_bytes, p.width, p.height, p.exif, p.page, p.density, p.keep_original,
+           p.created_at,
+           i.id AS image_id, i.angle, i.mirror, i.brightness, i.contrast, i.hue,
+           i.saturation, i.negative, i.sharpen
+    FROM photos p
+    JOIN subjects s ON s.id = p.subject_id
+    JOIN images i ON i.id = p.image_id
+    WHERE s.project_id = ${projectId} AND p.subject_id = ANY(${photoSubjectIds})`;
+  if (rows.length !== photoSubjectIds.length) {
+    throw new HttpError(404, 'not_found', 'photo not found');
+  }
+  const byId = new Map(rows.map((r) => [r['subject_id'] as string, photoRowToJson(r)]));
+  return photoSubjectIds.map((sid) => byId.get(sid)!);
 }
 
 /** Move a subject to trash (reason + prior list positions for items). */

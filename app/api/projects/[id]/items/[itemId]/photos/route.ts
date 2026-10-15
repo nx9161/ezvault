@@ -2,7 +2,7 @@
 import { handle, ok, parseJson, pagination, nextCursor, requireProject, HttpError } from '@/lib/api/route-utils';
 import { sql } from '@/lib/db/index';
 import { createPhotoRows, type PhotoEntry } from '@/lib/import/photos';
-import { getPhotoJson } from '@/lib/api/shapes';
+import { getPhotoJson, getPhotoJsonBatch } from '@/lib/api/shapes';
 import { idempotentCreate, readStashedResult, resolveClientOpId } from '@/lib/api/idempotency';
 import { isAllowedUploadMimetype } from '@/lib/import/validation';
 
@@ -20,8 +20,8 @@ export const GET = handle(async (req: Request, ctx: Ctx) => {
   const { limit, offset } = pagination(url);
   const rows = await sql()`SELECT subject_id FROM photos WHERE item_id = ${itemId} ORDER BY position LIMIT ${limit} OFFSET ${offset}`;
   const total = await sql()`SELECT COUNT(*)::int AS c FROM photos WHERE item_id = ${itemId}`;
-  const photos = [];
-  for (const r of rows) photos.push(await getPhotoJson(id, r['subject_id'] as string));
+  // A2: one batched load instead of N sequential getPhotoJson() queries.
+  const photos = await getPhotoJsonBatch(id, rows.map((r) => r['subject_id'] as string));
   return ok({
     items: photos,
     total: (total[0]['c'] as number),

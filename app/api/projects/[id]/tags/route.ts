@@ -13,10 +13,17 @@ export const GET = handle(async (req: Request, ctx: Ctx) => {
   await requireProject(id);
   const url = new URL(req.url);
   const { limit, offset } = pagination(url);
+  // A2: one grouped pass instead of a correlated count subquery per tag.
+  // The subjects join preserves the old same-project count semantics
+  // (taggings reference subjects; cross-project taggings are not counted).
   const rows = await sql()`SELECT t.id, t.name, t.color,
-      (SELECT COUNT(*)::int FROM taggings tg JOIN subjects s ON s.id = tg.subject_id
-       WHERE tg.tag_id = t.id AND s.project_id = ${id}) AS subject_count
-    FROM tags t WHERE t.project_id = ${id} ORDER BY t.name LIMIT ${limit} OFFSET ${offset}`;
+      COUNT(s.id)::int AS subject_count
+    FROM tags t
+    LEFT JOIN taggings tg ON tg.tag_id = t.id
+    LEFT JOIN subjects s ON s.id = tg.subject_id AND s.project_id = ${id}
+    WHERE t.project_id = ${id}
+    GROUP BY t.id, t.name, t.color
+    ORDER BY t.name LIMIT ${limit} OFFSET ${offset}`;
   const total = await sql()`SELECT COUNT(*)::int AS c FROM tags WHERE project_id = ${id}`;
   return ok({
     items: rows,

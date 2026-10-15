@@ -81,11 +81,19 @@ export const POST = handle(async (req: Request, ctx: Ctx) => {
       const reason = op.reason ?? 'user';
       if (!['user', 'auto', 'merge'].includes(reason)) throw new HttpError(400, 'validation', 'invalid trash reason');
       // trashSubject does its own txn; inline it here to keep ONE transaction.
+      // A2: one batched prior-lists lookup instead of a query per item.
+      const priorRows = await sql()`SELECT item_id, list_id, position FROM list_items WHERE item_id = ANY(${itemIds})`;
+      const priorByItem = new Map<string, { list_id: unknown; position: number }[]>();
+      for (const r of priorRows) {
+        const k = r['item_id'] as string;
+        if (!priorByItem.has(k)) priorByItem.set(k, []);
+        priorByItem.get(k)!.push({ list_id: r['list_id'], position: Number(r['position']) });
+      }
       for (const itemId of itemIds) {
-        const pl = await sql()`SELECT list_id, position FROM list_items WHERE item_id = ${itemId}`;
+        const pl = priorByItem.get(itemId) ?? [];
         queries.push(qq(`INSERT INTO trash (subject_id, reason, prior_lists) VALUES ($1,$2,$3::jsonb)
           ON CONFLICT (subject_id) DO UPDATE SET reason = EXCLUDED.reason, deleted_at = now()`,
-          [itemId, reason, JSON.stringify(pl.map((r) => ({ list_id: r['list_id'], position: Number(r['position']) })))]));
+          [itemId, reason, JSON.stringify(pl)]));
         queries.push(qq(`DELETE FROM list_items WHERE item_id = $1`, [itemId]));
       }
     } else {

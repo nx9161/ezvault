@@ -50,18 +50,26 @@ export const GET = handle(async (req: Request, ctx: Ctx) => {
     p++;
   }
   const where = filters.join(' AND ');
-  const base = `FROM subjects s ${joins.join(' ')} ${textJoin} WHERE ${where}`;
+  // A2: one grouped pass instead of three correlated scalar subqueries per
+  // row (photo/selection/note counts via LEFT JOIN + COUNT(DISTINCT)).
+  const base = `FROM subjects s ${joins.join(' ')}
+    LEFT JOIN photos p ON p.item_id = s.id
+    LEFT JOIN photos p2 ON p2.item_id = s.id
+    LEFT JOIN selections sel ON sel.photo_id = p2.subject_id
+    LEFT JOIN notes n ON n.subject_id = s.id AND n.deleted_at IS NULL
+    ${textJoin} WHERE ${where}`;
 
   const rows = await queryRaw(
     `SELECT s.id AS subject_id, s.template_id, s.created_at, s.updated_at,
-            (SELECT COUNT(*)::int FROM photos p WHERE p.item_id = s.id) AS photo_count,
-            (SELECT COUNT(*)::int FROM selections sel JOIN photos p ON p.subject_id = sel.photo_id
-             WHERE p.item_id = s.id) AS selection_count,
-            (SELECT COUNT(*)::int FROM notes n WHERE n.subject_id = s.id AND n.deleted_at IS NULL) AS note_count
-     ${base} ORDER BY ${sort} LIMIT $${p} OFFSET $${p + 1}`,
+            COUNT(DISTINCT p.subject_id)::int AS photo_count,
+            COUNT(DISTINCT sel.subject_id)::int AS selection_count,
+            COUNT(DISTINCT n.id)::int AS note_count
+     ${base} GROUP BY s.id, s.template_id, s.created_at, s.updated_at
+     ORDER BY ${sort} LIMIT $${p} OFFSET $${p + 1}`,
     [...params, limit, offset],
   );
-  const totalRows = await queryRaw<{ c: number }>(`SELECT COUNT(*)::int AS c ${base}`, params);
+  // A2: COUNT(DISTINCT s.id) — base now fans out via the count joins.
+  const totalRows = await queryRaw<{ c: number }>(`SELECT COUNT(DISTINCT s.id)::int AS c ${base}`, params);
   return ok({
     items: rows,
     total: totalRows[0]?.c ?? 0,
