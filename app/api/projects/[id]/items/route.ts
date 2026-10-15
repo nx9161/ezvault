@@ -2,6 +2,7 @@
 import { handle, ok, parseJson, pagination, nextCursor, requireProject, HttpError } from '@/lib/api/route-utils';
 import { sql, tx, queryRaw, bumpRevQuery } from '@/lib/db/index';
 import { idempotentCreate, readStashedResult, resolveClientOpId } from '@/lib/api/idempotency';
+import { resolveItemTitles, resolveItemCovers } from '@/lib/api/item-enrichment';
 import { randomUUID } from 'node:crypto';
 
 export const runtime = 'nodejs';
@@ -58,7 +59,9 @@ export const GET = handle(async (req: Request, ctx: Ctx) => {
   const where = filters.join(' AND ');
   // A2: one grouped pass instead of three correlated scalar subqueries per
   // row (photo/selection/note counts via LEFT JOIN + COUNT(DISTINCT)).
-  const base = `FROM subjects s ${joins.join(' ')}
+  // F-G: join items for the stored cover_image_id (enriched to a resolved
+  // cover below); every item row has an items row (created together).
+  const base = `FROM subjects s JOIN items i ON i.subject_id = s.id ${joins.join(' ')}
     LEFT JOIN photos p ON p.item_id = s.id
     LEFT JOIN photos p2 ON p2.item_id = s.id
     LEFT JOIN selections sel ON sel.photo_id = p2.subject_id
@@ -66,19 +69,33 @@ export const GET = handle(async (req: Request, ctx: Ctx) => {
     ${textJoin} WHERE ${where}`;
 
   const rows = await queryRaw(
-    `SELECT s.id AS subject_id, s.template_id, s.created_at, s.updated_at,
+    `SELECT s.id AS subject_id, s.template_id, s.created_at, s.updated_at, i.cover_image_id,
             ${listId ? 'li.position AS position,' : ''}
             COUNT(DISTINCT p.subject_id)::int AS photo_count,
             COUNT(DISTINCT sel.subject_id)::int AS selection_count,
             COUNT(DISTINCT n.id)::int AS note_count
-     ${base} GROUP BY s.id, s.template_id, s.created_at, s.updated_at${listId ? ', li.position' : ''}
+     ${base} GROUP BY s.id, s.template_id, s.created_at, s.updated_at, i.cover_image_id${listId ? ', li.position' : ''}
      ORDER BY ${sort} LIMIT $${p} OFFSET $${p + 1}`,
     [...params, limit, offset],
   );
   // A2: COUNT(DISTINCT s.id) — base now fans out via the count joins.
   const totalRows = await queryRaw<{ c: number }>(`SELECT COUNT(DISTINCT s.id)::int AS c ${base}`, params);
+  // F-G: batched title + cover enrichment — fixed query count, no N+1.
+  const pageIds = rows.map((r) => r['subject_id'] as string);
+  const [titles, firstPhotoCovers] = await Promise.all([
+    resolveItemTitles(pageIds),
+    resolveItemCovers(pageIds),
+  ]);
+  const items = rows.map((r) => {
+    const sid = r['subject_id'] as string;
+    return {
+      ...r,
+      title: titles.get(sid) ?? null,
+      cover_image_id: (r['cover_image_id'] as string | null) ?? firstPhotoCovers.get(sid) ?? null,
+    };
+  });
   return ok({
-    items: rows,
+    items,
     total: totalRows[0]?.c ?? 0,
     ...(nextCursor(offset, limit, rows.length) ? { nextCursor: nextCursor(offset, limit, rows.length) } : {}),
   });
