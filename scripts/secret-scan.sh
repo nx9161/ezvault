@@ -33,8 +33,37 @@ if grep -rn "NEXT_PUBLIC_.*\(KEY\|SECRET\|TOKEN\|PASSWORD\)" app components lib 
 fi
 
 # 4. No high-entropy long strings that look like pasted credentials in source.
-if grep -rEn "(AKIA[0-9A-Z]{16}|xox[bap]-|sk-live-|ghp_[A-Za-z0-9]{20,})" app lib components scripts --include='*.ts' --include='*.tsx' --include='*.mjs' --include='*.sh' 2>/dev/null; then
+# (excludes this script itself — its pattern literal is the detector, not a secret)
+if grep -rEn "(AKIA[0-9A-Z]{16}|xox[bap]-|sk-live-|ghp_[A-Za-z0-9]{20,})" app lib components scripts --include='*.ts' --include='*.tsx' --include='*.mjs' --include='*.sh' --exclude='secret-scan.sh' 2>/dev/null; then
   echo "secret-scan: FAIL — credential-like pattern found in source"
+  fail=1
+fi
+
+# 5. B19: lib/db MUST import 'server-only' first (database access is
+#    server-only by construction) and must never reach client bundles.
+if ! grep -q "^import 'server-only';" lib/db/index.ts; then
+  echo "secret-scan: FAIL — lib/db/index.ts does not start with import 'server-only'"
+  fail=1
+fi
+# Any lib/ module (outside lib/db/) that imports lib/db directly must itself
+# be server-only. app/api/** route handlers are server-only by Next
+# construction (never shipped to clients), so they are exempt.
+for f in $(grep -rln "lib/db/index\.js\|@/lib/db" lib --include='*.ts' --include='*.tsx' 2>/dev/null); do
+  case "$f" in
+    lib/db/*) continue ;;
+  esac
+  if ! grep -q "import 'server-only'" "$f"; then
+    echo "secret-scan: FAIL — $f imports lib/db but has no import 'server-only'"
+    fail=1
+  fi
+done
+
+# 6. B19: no raw process.env in client-boundary files. lib/db/index.ts is the
+#    only source of DATABASE_URL; storage drivers read their env via
+#    lib/storage/env.ts (server-only). components/ + app/page-level client
+#    files must not touch process.env at all.
+if grep -rn "process\.env" components/ lib/store/ lib/commands/ lib/viewer/ messages/ --include='*.ts' --include='*.tsx' 2>/dev/null; then
+  echo "secret-scan: FAIL — process.env in client-boundary files"
   fail=1
 fi
 
