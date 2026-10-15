@@ -93,7 +93,20 @@ there is no reading the monthly backups back — that is the point.
    shred -u /tmp/data.key; unset DATA_KEY
    ```
 4. Restore to a **scratch** Neon branch and verify row counts against the
-   manifest before trusting it:
+   manifest before trusting it. `scripts/restore-scratch.sh` does the
+   decrypt (when given the `.enc` payload + `DATA_KEY`), the
+   `pg_restore --clean --if-exists`, and the verification in one step —
+   it refuses to run without `RESTORE_TARGET_ACK=1` so a live target can
+   never be hit by accident:
    ```bash
-   pg_restore --format=custom --no-owner -d "$SCRATCH_DATABASE_URL" restore.dump
+   # from a decrypted dump:
+   SCRATCH_DATABASE_URL="$SCRATCH_DATABASE_URL" RESTORE_TARGET_ACK=1 \
+     RESTORE_DUMP=restore.dump scripts/restore-scratch.sh
+   # or straight from the encrypted payload (DATA_KEY via env only):
+   SCRATCH_DATABASE_URL="$SCRATCH_DATABASE_URL" RESTORE_TARGET_ACK=1 \
+     RESTORE_DUMP_ENC=ezvault-<stamp>-<uuid>.dump.enc \
+     DATA_KEY="$(cat /tmp/data.key)" scripts/restore-scratch.sh
+   shred -u /tmp/data.key
    ```
+   The equivalent manual command (if you prefer it) is
+   `pg_restore --format=custom --no-owner -d "$SCRATCH_DATABASE_URL" restore.dump`.
