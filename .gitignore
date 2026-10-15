@@ -29,3 +29,4 @@ Thumbs.db
 # misc
 coverage/
 .nyc_output/
+backups/
