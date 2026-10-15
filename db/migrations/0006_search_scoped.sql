@@ -17,12 +17,12 @@
 -- Apply with: psql "$DATABASE_URL" -f db/migrations/0006_search_scoped.sql
 -- (see README "Deploy runbook" — migrations apply in filename order).
 
--- 1. New columns.
+-- 1. New columns (IF NOT EXISTS: safe to re-run after a partial apply).
 ALTER TABLE search_documents
-  ADD COLUMN doc_meta  TSVECTOR NOT NULL DEFAULT ''::tsvector,
-  ADD COLUMN doc_notes TSVECTOR NOT NULL DEFAULT ''::tsvector,
-  ADD COLUMN doc_tags  TSVECTOR NOT NULL DEFAULT ''::tsvector,
-  ADD COLUMN doctext   TEXT     NOT NULL DEFAULT '';
+  ADD COLUMN IF NOT EXISTS doc_meta  TSVECTOR NOT NULL DEFAULT ''::tsvector,
+  ADD COLUMN IF NOT EXISTS doc_notes TSVECTOR NOT NULL DEFAULT ''::tsvector,
+  ADD COLUMN IF NOT EXISTS doc_tags  TSVECTOR NOT NULL DEFAULT ''::tsvector,
+  ADD COLUMN IF NOT EXISTS doctext   TEXT     NOT NULL DEFAULT '';
 
 -- 2. Trigger function: populate the per-scope columns + doctext.
 CREATE OR REPLACE FUNCTION refresh_search_document(p_subject UUID) RETURNS void AS $$
@@ -65,12 +65,12 @@ SELECT refresh_search_document(s.id) FROM subjects s;
 
 -- 4. Indexes: one GIN per scope column + an expression GIN for the
 -- scope=all concatenation the route queries.
-CREATE INDEX search_documents_gin_meta  ON search_documents USING GIN (doc_meta);
-CREATE INDEX search_documents_gin_notes ON search_documents USING GIN (doc_notes);
-CREATE INDEX search_documents_gin_tags  ON search_documents USING GIN (doc_tags);
-CREATE INDEX search_documents_gin_all   ON search_documents USING GIN ((doc_meta || doc_notes || doc_tags));
+CREATE INDEX IF NOT EXISTS search_documents_gin_meta  ON search_documents USING GIN (doc_meta);
+CREATE INDEX IF NOT EXISTS search_documents_gin_notes ON search_documents USING GIN (doc_notes);
+CREATE INDEX IF NOT EXISTS search_documents_gin_tags  ON search_documents USING GIN (doc_tags);
+CREATE INDEX IF NOT EXISTS search_documents_gin_all   ON search_documents USING GIN ((doc_meta || doc_notes || doc_tags));
 
 -- 5. Drop the old combined column (its GIN index goes with it). The only
 -- readers were the search route and the items-grid q filter — both rewritten
 -- to the scoped columns in this same change.
-ALTER TABLE search_documents DROP COLUMN doc;
+ALTER TABLE search_documents DROP COLUMN IF EXISTS doc;
