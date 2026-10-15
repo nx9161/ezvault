@@ -64,14 +64,8 @@ export default function StorageDialog({ projectId }: { projectId: string }) {
   const [photosTruncated, setPhotosTruncated] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // 95% retention offer: client-triggered once per session (policy stays warn).
-  const [offered, setOffered] = useState(false);
-  useEffect(() => {
-    if (meter && meter.pct >= 95 && meter.policy !== "block" && !offered) {
-      setOffered(true);
-      setOpen(true);
-    }
-  }, [meter, offered, setOpen]);
+  // F-C: the 95% nudge is banner-only (owner default) — the retention
+  // dialog never auto-opens; it stays one click away via the banner button.
 
   // Fresh picker each time the dialog opens.
   useEffect(() => {

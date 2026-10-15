@@ -72,10 +72,14 @@ function MeterBanners({ projectId }: { projectId: string }) {
     <>
       {meter && meter.policy === "warn" && meter.pct >= 80 ? (
         <div className="ez-banner" data-kind="warn" role="status">
-          <span>{t("warn80", { pct: Math.round(meter.pct) })}</span>
+          <span>
+            {meter.pct >= 95
+              ? t("warn95Body", { pct: Math.round(meter.pct) })
+              : t("warn80", { pct: Math.round(meter.pct) })}
+          </span>
           <span className="ez-spacer" />
           <button type="button" className="ez-btn ez-btn--sm" onClick={() => setRetentionOpen(true)}>
-            {t("storage")}
+            {t("runRetention")}
           </button>
         </div>
       ) : null}
