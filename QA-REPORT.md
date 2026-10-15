@@ -123,3 +123,59 @@ Wave2/3 rows: correctly **not** claimed — no `/export/csv`, `/export/zip`, Ome
 ---
 
 **Next:** builders address F1–F6 (+ the (e) merge-button honesty fix and the stale "pending backend confirmation" comment in `ImportDialog.tsx:294`), push to `main`, and request QA round 2. No sign-off until all six are closed and re-verified.
+
+---
+
+# Round 2 — 2026-10-14 · Tree: `main` @ `ffe5436` (clean)
+
+**Seat:** QA Manager (10) · **Scope:** re-verify F1–F6 only (the 6 Round-1 blockers + adjudicated items), plus build/test/type gates and no-regression spot-checks.
+
+**Verdict: SIGN-OFF** — all six blockers cleared with evidence; no new blockers found. Residual live-infra items unchanged from Round 1.
+
+## Build verification (all green)
+
+| Check | Result |
+|---|---|
+| `npm run build` | GREEN (exit 0; ran twice in this round). Prebuild gates all pass: `secret-scan.sh` OK, `verify-codecs.mjs` OK (libvips 8.18.7, sharp 0.35.5; JP2000-absent warning is the wave-2 gate, by design), `check-licences.mjs` OK (LGPL-3.0 libheif-js dynamic-link only — allowed). 60+ `/api/*` routes emitted, all `ƒ` (dynamic). |
+| `npx tsc --noEmit` | CLEAN (exit 0) |
+| `npm test` | **38/38 pass** (`tsx --test test/*.test.mjs`) — up from 27; 9 suites incl. new `csp.test.mjs` (F1, 5 tests) and `search-snippet.test.mjs` (F3, 6 tests). Sanitizer (B13), CSV (B15), JSON-LD loader (B10), SVG (B6), magic-bytes suites all green — no regressions. |
+
+## Per-blocker re-verification
+
+**F1 — CSP R2 wildcard ✅ cleared.** `proxy.ts:73-90` exports `buildCspHeader(r2AccountId?)`, called at request time with `process.env.R2_ACCOUNT_ID`. When set, `connect-src 'self' https://*.r2.cloudflarestorage.com` and `img-src 'self' blob: data: https://*.r2.cloudflarestorage.com`; when absent, local-driver defaults unchanged. `script-src 'self'` untouched, no `unsafe-inline` anywhere except `style-src` (TipTap requirement, pre-existing). `test/csp.test.mjs` passes 5/5: wildcard present in both directives when account id set, blob:/data: kept, nothing added when absent, script-src strict. ⚠️ Live-browser check stays open: must re-verify against the real R2 host at first deploy (upload PUT + thumbnail + 1:1 original).
+
+**F2 — Folder uploads filed ✅ cleared (end-to-end).** Client: `ImportDialog.tsx:226-255` builds `listIdByKey` from folder-session grants (`g.list_id`) and passes `listId` per file (`:314`); `lib/import/upload.ts:101-104` posts it as `listId` on `/complete`. Server: `app/api/import/complete/route.ts:139-150` — explicit `listId` wins, else `relativePath` resolves against the job checkpoint's `dir_lists`; `relativePath` also stored as `photos.relative_path` audit (migration `db/migrations/0003_relative_path.sql`). Out-of-project `list_id` is rejected per file (`422:list_not_found`, route.ts:152-166) — no misfiling. `lib/import/photos.ts:123-126` inserts `list_items` in the SAME transaction as photo creation. B1/B18 probes in `/complete` confirmed intact. (Commit `ffe5436` also fixed a REAL secondary bug QA did not flag: the folder-session client was posting the wrong request shape and 400ing silently — verified the contract now matches server shape.)
+
+**F3 — Snippet entity contract ✅ cleared.** Dead `lib/search.tsx` is deleted (verified: no such file; tsc clean confirms no dangling imports). `lib/search-snippet.tsx:34-43` decodes the five wire entities in exactly one pass before creating React nodes — `test/search-snippet.test.mjs` passes 6/6: `R&amp;D` renders as `R&D`, entities inside/outside `<mark>` decoded, `&amp;lt;` does NOT double-decode (single-pass guarantee), hostile `<script>` outside marks never renders, empty input safe. Wire contract honored.
+
+**F4 — Retention modes ✅ cleared.** `app/api/projects/[id]/storage/compress/route.ts:15-61` accepts all three modes (`MODES = ['compress','flagged-only','prune']`); invalid mode → 400; `prune` calls `pruneTrashPhotos()` (`lib/api/shapes.ts:203`) — permanently deletes trashed photos' R2 originals+thumbs, writes `deleted_photos` audit rows, decrements counters; response `{ mode, irreversible: true, ... }`. UI: all three radios enabled in `components/meter/StorageDialog.tsx:231-251`; prune has an explicit irreversible confirm step (`:324-330`); flagged-only lazily loads the photo picker and blocks run until ≥1 selected (`:187`). Copy matches the adjudication verbatim — radio: "Prune trash / Permanently deletes everything in Trash and frees its space. This cannot be undone."; confirm dialog body identical. Flagged hint fixed: "Compress only the photos you select below." Grep confirms no "originals untouched" language anywhere in the prune flow (the only "untouched" hit is the photo-edit revert string — correct semantics, unrelated flow). Backend semantics (trash bytes deleted, items stay trashed photoless) stand per the binding ruling; UI copy, server behavior, and docs agree.
+
+**F5 — Deploy runbook ✅ cleared.** `README.md:69-133` now has the full "Deploy runbook": (1) Vercel Deployment Protection = Standard Protection on **All Deployments**; `maxDuration: 300` verified (ADR-2.24); (2) env-var table incl. `MASTER_KEY` mirrored to the GitHub repo secret; explicit ⚠️ warning that deploying without R2 vars silently uses the ephemeral local driver (uploads lost on redeploy); (3) migration application order; (4) **unauthenticated post-deploy smoke test**: `curl -sI https://<app>.vercel.app` must NOT return 200 app HTML (must redirect to Vercel login — protection misconfiguration fails the pipeline), `/api/health` 503 pre-env / 200 post-env; (5) backup verification via `x-vercel-protection-bypass` or the `CRON_SECRET`-gated export route, with the exact GitHub secrets the workflow needs.
+
+**F6 — Crypto-shredding + disclosure ✅ cleared.** `.github/workflows/backup-monthly.yml`: fresh per-backup `DATA_KEY=$(openssl rand -hex 32)` (`:103`); `pg_dump` AND every JSON-LD payload encrypted via `openssl enc -aes-256-cbc -pbkdf2` (`:105-111`); data key wrapped with `MASTER_KEY` (GitHub secret) into `key.enc` (`:115`); plaintext `DATA_KEY` unset immediately (`:116`); plaintext dump + JSON scrubbed before upload (`rm -f "$PG_DUMP" backups/jsonld/*.json`, `:119`); upload step syncs only `.enc` payloads + `key.enc` + manifest (comment states plaintext is gone, `:165`); 365-day lifecycle rule enforced idempotently (`:170-185`); runner dir scrubbed `if: always()` (`:187`). `README.md` Privacy section discloses 365-day retention, per-backup data keys, MASTER_KEY wrap, and the crypto-shredding "delete everything" path pointing at `docs/RUNBOOK.md`. `docs/RUNBOOK.md` documents the full 4-step delete-everything procedure (destroy MASTER_KEY in Vercel + GitHub → delete Neon DB → empty R2 buckets → cron fail-loud confirmation) and discloses that the in-app "purge everything" button is v1.1 (manual procedure is the only path — visible, not hidden).
+
+## Adjudication confirmations (binding — verified, not re-litigated)
+
+- **Merge items = wave 2, visibly gated:** `components/center/CenterPanel.tsx:463-464` — merge button rendered `disabled` with tooltip "Item merging ships in wave 2 — not available in v1." and label "Merge items (wave 2)". No functional-looking confirm dialog remains.
+- **Ask-policy two-phase = accepted design:** stale "pending backend confirmation" comment gone — `ImportDialog.tsx:334-343` now documents the client two-phase as the intended protocol.
+- **In-app "Delete everything" button = v1.1:** disclosed in RUNBOOK.md and README Privacy; not promised in UI.
+
+## No-regression spot-checks (Round-1 gates affected by the fix surface)
+
+| Gate | Result |
+|---|---|
+| B1/B18 in `/complete` (magic probe + sha256 + staged-delete) | intact — `reject()` helper (`:87-88`) + header comment (`:20-23`) confirm; F2 additions wrap around it |
+| B14 server (`lib/search/query.ts`) | untouched |
+| B13/B15/B10/B6/B1 test suites | 38/38 green incl. adversarial coverage |
+| B26 workflow soundness (previously verified) | strengthened, not broken — lifecycle + scrub steps added |
+| No stray references to deleted `lib/search.tsx` | none (tsc clean; grep finds only the deleted file's own history) |
+| `git status` | clean at `ffe5436` before QA append |
+
+## Unverifiable until live infra + deploy (unchanged from Round 1)
+
+- F1 re-verified against the real R2 host (upload PUT + thumbnail + 1:1 original in a real browser).
+- B16 rate-limit under concurrency; FTS `<500ms warm` target; presigned R2 round-trips; 302 `Cache-Control: private` at the edge; `attachment` disposition.
+- `.tpy` wizard end-to-end (his 48-item Advanced file is the acceptance fixture).
+- Monthly backup workflow first run + restore-to-scratch-branch spot check; `maxDuration: 300` honored on the plan.
+
+**Next:** builders get no Round-3 work from this QA pass. Remaining live-infra checks belong to the post-deploy phase; the Phase-4 v1 build is **QA signed-off**. Recommended: QA round 3 (if desired) re-verifies the live-infra list at first deploy.
