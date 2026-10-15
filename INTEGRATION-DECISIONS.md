@@ -18,7 +18,7 @@ Measurement scripts used: `/tmp/measure-first-load.cjs`,
 
 ## 1. react-hotkeys-hook@5.3.3 — shortcut registry (Wave 1, FIRST)
 
-**Status:** ACCEPTED · landed 2026-10-15 · commit `TBD`
+**Status:** ACCEPTED · landed 2026-10-15 · commit `4db5d70`
 
 **What it is:** React hook for binding keyboard shortcuts
 (`useHotkeys`), by Johannes Klauss.
