@@ -1,0 +1,107 @@
+# EZVault deploy runbook
+
+One sitting, start to finish, zero cost. Do the steps in order; the B7
+smoke test at the end proves the protection gate is actually on.
+
+Prereqs: the repo pushed to GitHub (`nx9161/ezvault`), and accounts on
+Neon, Cloudflare, and Vercel (all free tiers).
+
+## 1. Neon — database
+
+1. Create a free Neon project (region closest to you).
+2. Copy the Postgres connection string (the pooled one is fine — the
+   app uses the HTTP driver).
+3. Save it as `DATABASE_URL` for step 4.
+
+## 2. Cloudflare R2 — buckets
+
+1. R2 → create bucket **`ezvault-data`** (live originals, thumbs,
+   exports, staging).
+2. R2 → create bucket **`ezvault-backups`** (private; monthly backups;
+   the `backup-monthly` workflow applies the 365-day lifecycle rule).
+3. R2 → Manage API tokens → create a token with Object Read & Write on
+   both buckets. Save `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
+   `R2_SECRET_ACCESS_KEY`.
+
+## 3. Apply migrations (in filename order)
+
+```bash
+for f in db/migrations/*.sql; do psql "$DATABASE_URL" -f "$f"; done
+```
+
+Expect: `0001_init.sql` … `0007_cpu_window_active.sql` apply cleanly.
+(Re-running is safe — migrations 0006/0007 use `IF NOT EXISTS` /
+idempotent DDL patterns.)
+
+## 4. Vercel — project
+
+1. Import the GitHub repo.
+2. **Deployment Protection ON:** Project → Settings → Deployment
+   Protection → **Standard Protection** on **All Deployments**. This is
+   the single-user gate — the app must never be reachable without the
+   Vercel login.
+3. Environment Variables (Production): paste all 8 names from
+   `ENV-INVENTORY.md` (values from steps 1–2; generate `CRON_SECRET`
+   with `openssl rand -base64 32` and `MASTER_KEY` with
+   `openssl rand -hex 32`).
+4. Build command must be **`npm run build`** (Vercel's Next.js default)
+   so the `prebuild` gates run: secret scan, codec verification,
+   licence check. A build that skips `prebuild` is not a valid deploy.
+5. Deploy.
+
+## 5. B7 smoke test (owner-runnable curls)
+
+```bash
+APP=https://<your-app>.vercel.app
+
+# 1. Root must NOT serve app HTML unauthenticated — expect a redirect
+#    to the Vercel login (302/307). If you get 200 with app HTML,
+#    Deployment Protection is OFF: fix it (step 4.2) and redeploy.
+curl -sI "$APP" | head -1
+
+# 2. Health: with env configured, expect 200 {"status":"ok",...}.
+#    (Pre-env it answers 503 {"status":"not_configured",...} — that is
+#    the correct pre-configuration signal, not a failure.)
+curl -s "$APP/api/health"
+
+# 3. Health detail must never leak a stack trace or secret.
+curl -s "$APP/api/health" | grep -oi "stack\|secret\|key" || echo "clean"
+```
+
+## 6. Nightly cron wiring
+
+`vercel.json` declares the canonical schedule — daily `0 8 * * *` UTC →
+`/api/cron/nightly` — but read this wrinkle before relying on it:
+
+> **Vercel Cron cannot send custom headers.** The nightly route requires
+> `Authorization: Bearer $CRON_SECRET` and 401s without it, so a
+> Vercel-Cron-fired call fails closed. The binding trigger is the
+> `.github/workflows/nightly-cron.yml` workflow, which calls the route
+> with the Bearer header (plus the Deployment Protection bypass
+> header). Set its repo secrets: `APP_URL`, `CRON_SECRET`,
+> `VERCEL_BYPASS` (Project → Settings → Deployment Protection →
+> protection bypass secret).
+
+Owner decision (not implemented): if you would rather have Vercel Cron
+call the route directly, the alternative is accepting the secret as a
+query parameter — that widens the secret's exposure surface (URLs are
+logged), so it stays your call.
+
+## 7. Backup-access procedure
+
+Vercel Authentication gates the app's API surface too, so anything that
+verifies live backups against the running app must authenticate twice:
+
+- `x-vercel-protection-bypass: <bypass secret>` (Project → Settings →
+  Deployment Protection), **and**
+- `Authorization: Bearer $CRON_SECRET` for the cron-gated routes.
+
+The scheduled `backup-monthly` workflow is unaffected (it talks to Neon
+and the bucket directly), but it needs the GitHub secrets
+`DATABASE_URL`, `MASTER_KEY`, `BACKUP_S3_ENDPOINT`,
+`BACKUP_S3_ACCESS_KEY_ID`, `BACKUP_S3_SECRET_ACCESS_KEY`, and
+`BACKUP_BUCKET`.
+
+Restoring is documented in `docs/RUNBOOK.md` (scratch database only,
+never over live). "Delete everything" (live purge endpoint + manual
+MASTER_KEY destruction for backups) is also in `docs/RUNBOOK.md`.

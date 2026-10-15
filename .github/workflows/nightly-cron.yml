@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: MIT
+# Nightly maintenance caller: /api/cron/nightly runs the staging sweep,
+# queue tick, counter reconciliation, export expiry, and CPU window roll.
+#
+# Why GitHub Actions and not Vercel Cron alone: the route requires
+# `Authorization: Bearer $CRON_SECRET` and Vercel Cron cannot send custom
+# headers (its daily call 401s). vercel.json still declares the 08:00 UTC
+# schedule as the canonical slot; THIS workflow is the binding trigger
+# because it can attach the header. Vercel Authentication also gates the
+# API surface, so the protection-bypass header goes along.
+#
+# Repo secrets needed: APP_URL (e.g. https://ezvault.vercel.app),
+# CRON_SECRET (mirrors the Vercel env var), VERCEL_BYPASS (Project →
+# Settings → Deployment Protection → protection bypass secret).
+
+name: nightly-cron
+
+on:
+  schedule:
+    - cron: '0 8 * * *' # 08:00 UTC daily
+  workflow_dispatch: {} # manual run (still needs secrets)
+
+permissions:
+  contents: read # no write needed
+
+concurrency:
+  group: nightly-cron
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call /api/cron/nightly
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_BYPASS: ${{ secrets.VERCEL_BYPASS }}
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /tmp/nightly.json -w '%{http_code}' \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "x-vercel-protection-bypass: $VERCEL_BYPASS" \
+            "$APP_URL/api/cron/nightly")"
+          cat /tmp/nightly.json; echo
+          if [ "$code" != "200" ]; then
+            echo "nightly cron failed: HTTP $code"
+            exit 1
+          fi
