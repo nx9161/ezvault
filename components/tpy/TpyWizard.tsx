@@ -80,11 +80,16 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
   const [magicOk, setMagicOk] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
+  // F-D: determinate staging-upload progress (null when not uploading).
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
   const [stagingJobId, setStagingJobId] = useState<string | null>(null);
   const [report, setReport] = useState<AnalyzeReport | null>(null);
   const [templateMap, setTemplateMap] = useState<Record<string, string>>({});
   const [conflictPolicy, setConflictPolicy] = useState<"skip" | "copy">("skip");
   const [runJobId, setRunJobId] = useState<string | null>(null);
+  // F-D: run-step cancel state.
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelledNote, setCancelledNote] = useState(false);
   const [runReport, setRunReport] = useState<RunReport | null>(null);
   const [missing, setMissing] = useState<{ filename: string; photo_subject_id: string }[]>([]);
   const [confirmUndo, setConfirmUndo] = useState(false);
@@ -119,15 +124,37 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
         with_assets: !!assetsFile,
       });
       setStagingJobId(presigned.job_id);
-      await putWithProgress(presigned.tpy_grant.url, tpyFile, "application/x-sqlite3", () => {});
+      // F-D: wire the upload byte progress into a determinate bar.
+      const tpySize = tpyFile.size;
+      const zipSize = assetsFile?.size ?? 0;
+      const totalBytes = tpySize + zipSize;
+      let tpyLoaded = 0;
+      let zipLoaded = 0;
+      const reportUpload = () => {
+        if (totalBytes > 0) setUploadPct(Math.round(((tpyLoaded + zipLoaded) / totalBytes) * 100));
+      };
+      setUploadPct(0);
+      await putWithProgress(
+        presigned.tpy_grant.url,
+        tpyFile,
+        "application/x-sqlite3",
+        (loaded) => {
+          tpyLoaded = loaded;
+          reportUpload();
+        },
+      );
       if (assetsFile && presigned.assets_grant) {
         await putWithProgress(
           presigned.assets_grant.url,
           assetsFile,
           assetsFile.type || "application/octet-stream",
-          () => {},
+          (loaded) => {
+            zipLoaded = loaded;
+            reportUpload();
+          },
         );
       }
+      setUploadPct(null);
       // 2. Register the staged files, then analyze (server-side single pass).
       await post("/api/import/tpy/upload-complete", {
         job_id: presigned.job_id,
@@ -150,6 +177,22 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
       setStep("upload");
     } finally {
       setBusy(false);
+    }
+  }
+
+  // F-D: safe cancel — the backend marks the job cancelled and deletes
+  // staged files (POST /api/jobs/[jobId]/cancel); the useJob poll then
+  // carries the terminal state into the report step.
+  async function cancelRun() {
+    if (!runJobId || cancelling) return;
+    setCancelling(true);
+    try {
+      await post(`/api/jobs/${runJobId}/cancel`);
+      setCancelledNote(true);
+    } catch {
+      /* the poll will surface the true state */
+    } finally {
+      setCancelling(false);
     }
   }
 
@@ -406,7 +449,18 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
 
       {step === "analyze" ? (
         <div className="ez-state" style={{ height: "auto" }} data-tour="tpy-analyze">
-          <p>{progress || t("analyzing")}</p>
+          {uploadPct !== null ? (
+            <div className="ez-job-row">
+              <span className="ez-progress">
+                <span style={{ width: `${uploadPct}%` }} />
+              </span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                {t("uploadingPct", { pct: uploadPct })}
+              </span>
+            </div>
+          ) : (
+            <p>{progress || t("analyzing")}</p>
+          )}
         </div>
       ) : null}
 
@@ -483,7 +537,17 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
               {runJob ? t("importing", { done: runJob.done, total: runJob.total }) : t("analyzing")}
             </span>
+            <span className="ez-spacer" />
+            <button
+              type="button"
+              className="ez-btn ez-btn--sm"
+              disabled={cancelling || !runJobId || (runJob?.status !== "running" && runJob?.status !== "queued")}
+              onClick={cancelRun}
+            >
+              {t("cancelRun")}
+            </button>
           </div>
+          {cancelledNote ? <p className="ez-notice">{t("cancelledNote")}</p> : null}
           <p className="ez-notice">{t("tpyHint")}</p>
         </div>
       ) : null}
