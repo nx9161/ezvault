@@ -29,21 +29,36 @@ export interface CpuWindow {
   paused: boolean;
 }
 
-/** Fetch the active window, rolling it lazily when expired/missing. */
+/** Fetch the active window, rolling it lazily when expired/missing.
+ *
+ * A5: the old SELECT-then-INSERT raced — two concurrent first-calls could
+ * both insert a window. Now exactly one row carries active = true (partial
+ * unique index, migration 0007). This function (1) deactivates expired
+ * active windows (idempotent, safe to race), then (2) INSERTs the fresh
+ * window only when no unexpired active window exists, with
+ * ON CONFLICT (active) WHERE active DO UPDATE converging concurrent
+ * first-calls on the single winner's row (RETURNING yields it).
+ */
 export async function currentWindow(): Promise<CpuWindow> {
+  await sql()`UPDATE cpu_budget_windows SET active = false WHERE active AND window_end <= now()`;
   const rows = await sql()`
-    SELECT id, window_start, window_end, cpu_seconds, paused
-    FROM cpu_budget_windows
-    ORDER BY window_end DESC LIMIT 1`;
-  const w = (rows[0] as unknown as CpuWindow | undefined);
-  const now = new Date();
-  if (!w || new Date(w.window_end) <= now) {
-    const created = await sql()`
-      INSERT INTO cpu_budget_windows (window_start, window_end, cpu_seconds, paused)
-      VALUES (now(), now() + interval '30 days', 0, false)
-      RETURNING id, window_start, window_end, cpu_seconds, paused`;
-    return created[0] as unknown as CpuWindow;
-  }
+    WITH latest AS (
+      SELECT id, window_start, window_end, cpu_seconds, paused
+      FROM cpu_budget_windows WHERE active LIMIT 1
+    ),
+    ins AS (
+      INSERT INTO cpu_budget_windows (window_start, window_end, cpu_seconds, paused, active)
+      SELECT now(), now() + interval '30 days', 0, false, true
+      WHERE NOT EXISTS (SELECT 1 FROM latest WHERE window_end > now())
+      ON CONFLICT (active) WHERE active DO UPDATE SET active = EXCLUDED.active
+      RETURNING id, window_start, window_end, cpu_seconds, paused
+    )
+    SELECT id, window_start, window_end, cpu_seconds, paused FROM ins
+    UNION ALL
+    SELECT id, window_start, window_end, cpu_seconds, paused FROM latest
+    WHERE NOT EXISTS (SELECT 1 FROM ins)`;
+  const w = rows[0] as unknown as CpuWindow | undefined;
+  if (!w) throw new Error('cpu_budget_windows: no active window row');
   return { ...w, cpu_seconds: Number(w.cpu_seconds) };
 }
 
