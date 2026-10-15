@@ -243,16 +243,23 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
     if (reportedRef.current === runJob.id) return;
     reportedRef.current = runJob.id;
     (async () => {
-      // Missing originals (advanced mode) surface on the job's report payload.
+      // QA (W2): do NOT overwrite the run-POST seed here. GET
+      // /api/jobs/[jobId] (getJobState) never returns a `report` payload, so
+      // `runJob.report` is always undefined at runtime — blindly mapping it
+      // to setMissing wiped the missing list doRun seeded from the run POST
+      // response and the relink step never rendered. Only overwrite when the
+      // job report actually carries a missing_originals list.
       const jobRep = (runJob.report ?? {}) as {
         missing_originals?: { filename: string; photo_subject_id: string }[];
       };
-      setMissing(
-        (jobRep.missing_originals ?? []).map((m) => ({
-          filename: m.filename,
-          photo_subject_id: m.photo_subject_id,
-        })),
-      );
+      if (jobRep.missing_originals && jobRep.missing_originals.length > 0) {
+        setMissing(
+          jobRep.missing_originals.map((m) => ({
+            filename: m.filename,
+            photo_subject_id: m.photo_subject_id,
+          })),
+        );
+      }
       setStep("report");
       commandBus.push(importUndoCommand(ctx, runJob.id, t("undoTpy")));
       void refreshAndBroadcast(ctx, ["items", "lists", "tags", "meter"]);

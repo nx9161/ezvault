@@ -132,7 +132,9 @@ test("Advanced: missing originals re-link by checksum, counts intact", async ({
       join(FX, "advanced-originals", "adv-b.png"),
       join(FX, "advanced-originals", "adv-c.png"),
     ]);
-  await expect(dialog.getByText("3 originals re-linked.")).toBeVisible({
+  // QA: the success confirmation is a shell-level toast (WorkspaceClient
+  // <Toasts/>), not dialog content — scope it to the page.
+  await expect(page.getByText("3 originals re-linked.")).toBeVisible({
     timeout: 120_000,
   });
   await dialog.getByRole("button", { name: "Done" }).click();
