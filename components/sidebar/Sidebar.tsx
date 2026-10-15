@@ -798,6 +798,7 @@ function TagsSection({ projectId }: { projectId: string }) {
 }
 
 export default function Sidebar({ projectId }: { projectId: string }) {
+  const t = useTranslations("sidebar");
   const sidebarOpen = useUiStore((s) => s.sidebarOpen);
   const setSidebarOpen = useUiStore((s) => s.setSidebarOpen);
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
@@ -813,7 +814,7 @@ export default function Sidebar({ projectId }: { projectId: string }) {
         className="ez-sidebar"
         data-open={sidebarOpen}
         style={isDesktop ? { width: sidebarWidth } : undefined}
-        aria-label="sidebar"
+        aria-label={t("paneLabel")}
       >
         <div className="ez-sidebar-scroll">
           <LibrarySection projectId={projectId} />

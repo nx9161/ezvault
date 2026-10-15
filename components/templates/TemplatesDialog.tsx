@@ -12,7 +12,7 @@ import { post, patch, del } from "@/lib/api/client";
 import { mutate } from "swr";
 import { Dialog, ConfirmDialog } from "@/components/ui/Dialog";
 import { ErrorCard } from "@/components/ui/Feedback";
-import { ExportIcon, NoteIcon, TrashIcon } from "@/components/ui/icons";
+import { ExportIcon, NoteIcon, TrashIcon, ChevronDownIcon, ChevronRightIcon } from "@/components/ui/icons";
 import type { UiTemplate, UiTemplateField, FieldWidget } from "@/lib/api/types";
 
 function TemplateRow({
@@ -77,9 +77,9 @@ function TemplateRow({
           aria-expanded={expanded}
           style={{ fontWeight: 600, flex: 1, textAlign: "left", justifyContent: "flex-start" }}
         >
-          {expanded ? "▾" : "▸"} {template.name}
+          {expanded ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />} {template.name}
           <span style={{ fontWeight: 400, color: "var(--ink-3)", fontSize: 11, marginLeft: 8 }}>
-            {template.fields.length} fields
+            {template.fields.length} {t("fields")}
           </span>
         </button>
         <button

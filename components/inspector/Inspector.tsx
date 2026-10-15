@@ -179,7 +179,7 @@ function SingleItemInspector({ projectId, itemId }: { projectId: string; itemId:
             <CloseIcon size={14} />
           </button>
         </div>
-        <div className="ez-tabs" role="tablist" aria-label="inspector">
+        <div className="ez-tabs" role="tablist" aria-label={t("paneLabel")}>
           {TABS.map((tab) => (
             <button
               key={tab}
@@ -284,7 +284,7 @@ export default function Inspector({ projectId }: { projectId: string }) {
         className="ez-inspector"
         data-open={inspectorOpen || !!activeItemId || bulkIds.length > 0}
         style={isDesktop ? { width: inspectorWidth } : undefined}
-        aria-label="inspector"
+        aria-label={t("paneLabel")}
       >
         {!activeItemId && bulkIds.length === 0 ? (
           <div className="ez-state">

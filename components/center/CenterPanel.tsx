@@ -190,9 +190,12 @@ function ItemCard({
 function ItemGrid({
   items,
   projectId,
+  label,
 }: {
   items: Item[];
   projectId: string;
+  /** contextual breadcrumb label for the grid's aria-label (D-MICRO) */
+  label: string;
 }) {
   const density = useUiStore((s) => s.density);
   const selectedIds = useUiStore((s) => s.selectedIds);
@@ -293,7 +296,7 @@ function ItemGrid({
       onKeyDown={onGridKeyDown}
       role="listbox"
       aria-multiselectable="true"
-      aria-label="items"
+      aria-label={label}
       tabIndex={-1}
     >
       <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
@@ -334,7 +337,7 @@ function ItemGrid({
 
 const TABLE_COLS = "56px minmax(140px,1fr) 70px minmax(100px,1fr) 100px 100px";
 
-function ItemTable({ items, projectId }: { items: Item[]; projectId: string }) {
+function ItemTable({ items, projectId, label }: { items: Item[]; projectId: string; label: string }) {
   const t = useTranslations("center");
   const density = useUiStore((s) => s.density);
   const selectedIds = useUiStore((s) => s.selectedIds);
@@ -362,7 +365,7 @@ function ItemTable({ items, projectId }: { items: Item[]; projectId: string }) {
   };
 
   return (
-    <div ref={parentRef} className="ez-table-wrap" id="ez-grid" tabIndex={-1} role="grid" aria-label="items">
+    <div ref={parentRef} className="ez-table-wrap" id="ez-grid" tabIndex={-1} role="grid" aria-label={label}>
       <div
         role="row"
         style={{
@@ -778,7 +781,7 @@ export default function CenterPanel({ projectId }: { projectId: string }) {
 
   if (searchActive) {
     return (
-      <section className="ez-center" aria-label="search">
+      <section className="ez-center" aria-label={t("breadcrumbSearch")}>
         <SearchResults projectId={projectId} />
       </section>
     );
@@ -787,7 +790,7 @@ export default function CenterPanel({ projectId }: { projectId: string }) {
   const emptyLibrary = !isLoading && !error && items.length === 0 && libraryFilter === "all" && !activeListId && activeTagIds.length === 0;
 
   return (
-    <section className="ez-center" aria-label="items">
+    <section className="ez-center" aria-label={breadcrumb}>
       <div className="ez-center-head">
         <nav className="ez-breadcrumb" aria-label="breadcrumb">
           <strong>{breadcrumb}</strong>
@@ -844,9 +847,9 @@ export default function CenterPanel({ projectId }: { projectId: string }) {
           <p>{t("emptyListBody")}</p>
         </div>
       ) : view === "grid" ? (
-        <ItemGrid items={items} projectId={projectId} />
+        <ItemGrid items={items} projectId={projectId} label={breadcrumb} />
       ) : (
-        <ItemTable items={items} projectId={projectId} />
+        <ItemTable items={items} projectId={projectId} label={breadcrumb} />
       )}
     </section>
   );

@@ -17,6 +17,7 @@ import { ErrorCard } from "@/components/ui/Feedback";
 export default function SettingsDialog({ projectId }: { projectId: string }) {
   const t = useTranslations("settings");
   const ta = useTranslations("app");
+  const ti = useTranslations("import");
   const open = useUiStore((s) => s.settingsOpen);
   const setOpen = useUiStore((s) => s.setSettingsOpen);
   const pushToast = useUiStore((s) => s.pushToast);
@@ -119,9 +120,9 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
               value={duplicatePolicy}
               onChange={(e) => setDuplicatePolicy(e.target.value)}
             >
-              <option value="skip">Skip</option>
-              <option value="keep_both">Keep both</option>
-              <option value="ask">Ask</option>
+              <option value="skip">{ti("policySkip")}</option>
+              <option value="keep_both">{ti("policyKeepBoth")}</option>
+              <option value="ask">{ti("policyAsk")}</option>
             </select>
           </div>
           <div className="ez-field">
