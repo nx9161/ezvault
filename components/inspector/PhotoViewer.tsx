@@ -22,6 +22,13 @@ import {
 } from "@/lib/commands/ops";
 import { DEFAULT_EDITS, editsDirty, adaptSelection, selectionWire, type Photo, type PhotoEdits, type Selection } from "@/lib/api/types";
 import { ConfirmDialog } from "@/components/ui/Dialog";
+import {
+  ZoomInIcon,
+  ZoomOutIcon,
+  RotateIcon,
+  RotateCwIcon,
+  SelectionDrawIcon,
+} from "@/components/ui/icons";
 
 type FitMode = "fit" | "width" | "one";
 
@@ -507,11 +514,11 @@ export default function PhotoViewer({
         <button type="button" className="ez-icon-btn" onClick={() => {
           const r = overlayRef.current!.getBoundingClientRect();
           zoomAt(r.width / 2, r.height / 2, 1.25);
-        }} aria-label={t("zoomIn")} title={t("zoomIn")}>+</button>
+        }} aria-label={t("zoomIn")} title={t("zoomIn")}><ZoomInIcon size={15} /></button>
         <button type="button" className="ez-icon-btn" onClick={() => {
           const r = overlayRef.current!.getBoundingClientRect();
           zoomAt(r.width / 2, r.height / 2, 1 / 1.25);
-        }} aria-label={t("zoomOut")} title={t("zoomOut")}>−</button>
+        }} aria-label={t("zoomOut")} title={t("zoomOut")}><ZoomOutIcon size={15} /></button>
         <input
           type="range"
           className="ez-range"
@@ -552,7 +559,7 @@ export default function PhotoViewer({
           aria-label={t("rotate")}
           title={`${t("rotate")} (${t("rotateHint")})`}
         >
-          ⟲
+          <RotateIcon size={15} />
         </button>
         <button
           type="button"
@@ -562,7 +569,7 @@ export default function PhotoViewer({
           aria-label={drawing ? t("cancelDraw") : t("drawSelection")}
           title={`${t("drawSelection")} (${t("drawSelectionHint")})`}
         >
-          ▢
+          <SelectionDrawIcon size={15} />
         </button>
       </div>
 
@@ -603,8 +610,8 @@ export default function PhotoViewer({
         <div className="ez-edit-body">
           <div className="ez-toggle-row">
             <span style={{ width: 110 }}>{t("rotation")}</span>
-            <button type="button" className="ez-btn ez-btn--sm" onClick={() => rotateStep(-1)} aria-label={t("rotateCcw")}>⟲ 90°</button>
-            <button type="button" className="ez-btn ez-btn--sm" onClick={() => rotateStep(1)} aria-label={t("rotateCw")}>⟳ 90°</button>
+            <button type="button" className="ez-btn ez-btn--sm" onClick={() => rotateStep(-1)} aria-label={t("rotateCcw")}><RotateIcon size={13} /> 90°</button>
+            <button type="button" className="ez-btn ez-btn--sm" onClick={() => rotateStep(1)} aria-label={t("rotateCw")}><RotateCwIcon size={13} /> 90°</button>
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{edits.angle}°</span>
           </div>
           <label className="ez-toggle-row">
@@ -660,14 +667,14 @@ export default function PhotoViewer({
           {editsDirty(edits) ? (
             <div>
               <div className="ez-chip-row" aria-label={t("editsApplied")}>
-                {edits.angle !== 0 ? <span className="ez-chip">∠ {edits.angle}°</span> : null}
-                {edits.mirror ? <span className="ez-chip">⇋</span> : null}
-                {edits.negative ? <span className="ez-chip">◐</span> : null}
+                {edits.angle !== 0 ? <span className="ez-chip"><RotateIcon size={12} /> {edits.angle}°</span> : null}
+                {edits.mirror ? <span className="ez-chip">{t("chipMirrored")}</span> : null}
+                {edits.negative ? <span className="ez-chip">{t("chipNegative")}</span> : null}
                 {edits.brightness !== 0 ? <span className="ez-chip">B {edits.brightness}</span> : null}
                 {edits.contrast !== 0 ? <span className="ez-chip">C {edits.contrast}</span> : null}
                 {edits.saturation !== 0 ? <span className="ez-chip">S {edits.saturation}</span> : null}
                 {edits.hue !== 0 ? <span className="ez-chip">H {edits.hue}</span> : null}
-                {edits.sharpen !== 0 ? <span className="ez-chip">♯ {edits.sharpen}</span> : null}
+                {edits.sharpen !== 0 ? <span className="ez-chip">{t("chipSharpen")} {edits.sharpen}</span> : null}
               </div>
               <button
                 type="button"

@@ -12,6 +12,7 @@ import { editsDirty } from "@/lib/api/types";
 import { runCommand, trashSubjectsOp } from "@/lib/commands/ops";
 import { useOpContext } from "@/components/sidebar/Sidebar";
 import { ErrorCard, SkeletonRows } from "@/components/ui/Feedback";
+import { ExportIcon, TrashIcon, CloseIcon } from "@/components/ui/icons";
 import PhotoViewer from "./PhotoViewer";
 import MetadataForm from "./MetadataForm";
 import NotesPanel from "./NotesPanel";
@@ -151,7 +152,7 @@ function SingleItemInspector({ projectId, itemId }: { projectId: string; itemId:
             aria-label={t("exportPhoto")}
             title={t("exportPhoto")}
           >
-            ⤓
+            <ExportIcon size={15} />
           </button>
           <button
             type="button"
@@ -164,7 +165,7 @@ function SingleItemInspector({ projectId, itemId }: { projectId: string; itemId:
             aria-label={t("trashItem")}
             title={t("trashItem")}
           >
-            🗑
+            <TrashIcon size={15} />
           </button>
           <button
             type="button"
@@ -174,7 +175,7 @@ function SingleItemInspector({ projectId, itemId }: { projectId: string; itemId:
             }}
             aria-label={t("closeInspector")}
           >
-            ✕
+            <CloseIcon size={14} />
           </button>
         </div>
         <div className="ez-tabs" role="tablist" aria-label="inspector">

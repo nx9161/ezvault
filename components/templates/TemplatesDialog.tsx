@@ -12,6 +12,7 @@ import { post, patch, del } from "@/lib/api/client";
 import { mutate } from "swr";
 import { Dialog, ConfirmDialog } from "@/components/ui/Dialog";
 import { ErrorCard } from "@/components/ui/Feedback";
+import { ExportIcon, NoteIcon, TrashIcon } from "@/components/ui/icons";
 import type { UiTemplate, UiTemplateField, FieldWidget } from "@/lib/api/types";
 
 function TemplateRow({
@@ -90,7 +91,7 @@ function TemplateRow({
             window.location.href = `/api/projects/${projectId}/templates/${template.id}/export`;
           }}
         >
-          ⤓
+          <ExportIcon size={15} />
         </button>
         <button
           type="button"
@@ -99,7 +100,7 @@ function TemplateRow({
           aria-label={ta("rename")}
           onClick={() => setRenaming(true)}
         >
-          ✎
+          <NoteIcon size={15} />
         </button>
         <button
           type="button"
@@ -108,7 +109,7 @@ function TemplateRow({
           aria-label={t("delete")}
           onClick={() => setConfirmDelete(true)}
         >
-          🗑
+          <TrashIcon size={15} />
         </button>
       </div>
       {renaming ? (

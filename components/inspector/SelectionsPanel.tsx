@@ -16,6 +16,7 @@ import {
 import { useOpContext } from "@/components/sidebar/Sidebar";
 import { ConfirmDialog } from "@/components/ui/Dialog";
 import { ErrorCard, SkeletonRows } from "@/components/ui/Feedback";
+import { NoteIcon, ExportIcon, TrashIcon } from "@/components/ui/icons";
 import type { Selection } from "@/lib/api/types";
 
 function SelectionCard({
@@ -111,7 +112,8 @@ function SelectionCard({
         )}
         {selection.note_count > 0 ? (
           <span className="ez-mini-badge" aria-label={t("notesCount", { count: selection.note_count })}>
-            ✎{selection.note_count}
+            <NoteIcon size={11} />
+            {selection.note_count}
           </span>
         ) : null}
         <button
@@ -124,7 +126,7 @@ function SelectionCard({
           aria-label={t("export")}
           title={t("export")}
         >
-          ⤓
+          <ExportIcon size={15} />
         </button>
         <button
           type="button"
@@ -136,7 +138,7 @@ function SelectionCard({
           aria-label={t("deleteSelection")}
           title={t("deleteSelection")}
         >
-          🗑
+          <TrashIcon size={15} />
         </button>
       </div>
       <div className="ez-rect-grid" onClick={(e) => e.stopPropagation()}>

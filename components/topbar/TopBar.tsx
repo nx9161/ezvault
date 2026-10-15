@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl";
 import { useUiStore } from "@/lib/store/ui";
 import { useMeter, useProject } from "@/lib/api/hooks";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "@/components/ui/Menu";
+import { GridIcon, TableIcon, ThemeIcon, ChevronDownIcon } from "@/components/ui/icons";
 
 /** Original archival-lamp glyph (drawn for EZVault — no borrowed artwork). */
 export function LampGlyph({ size = 22 }: { size?: number }) {
@@ -149,7 +150,7 @@ export default function TopBar({ projectId }: { projectId: string }) {
         <div
           className="ez-segmented"
           role="group"
-          aria-label={t("viewHint")}
+          aria-label={t("viewGroupLabel")}
         >
           <button
             type="button"
@@ -157,7 +158,7 @@ export default function TopBar({ projectId }: { projectId: string }) {
             onClick={() => setView("grid")}
             title={`${t("viewGrid")} (${t("viewHint")})`}
           >
-            ▦ {t("viewGrid")}
+            <GridIcon size={15} /> {t("viewGrid")}
           </button>
           <button
             type="button"
@@ -165,7 +166,7 @@ export default function TopBar({ projectId }: { projectId: string }) {
             onClick={() => setView("table")}
             title={`${t("viewTable")} (${t("viewHint")})`}
           >
-            ☰ {t("viewTable")}
+            <TableIcon size={15} /> {t("viewTable")}
           </button>
         </div>
         <MeterChip projectId={projectId} onOpen={() => setRetentionOpen(true)} />
@@ -176,7 +177,10 @@ export default function TopBar({ projectId }: { projectId: string }) {
           aria-label={t("themeToggle")}
           title={t("themeToggle")}
         >
-          {theme === "light" ? "◐" : "◑"}
+          <ThemeIcon
+            size={15}
+            style={theme === "light" ? undefined : { transform: "rotate(180deg)" }}
+          />
         </button>
         <button
           type="button"
@@ -188,7 +192,7 @@ export default function TopBar({ projectId }: { projectId: string }) {
             setMenuAt({ x: r.left, y: r.bottom + 6 });
           }}
         >
-          {project?.name ?? "…"} ▾
+          {project?.name ?? "…"} <ChevronDownIcon size={13} />
         </button>
         {menuAt ? (
           <Menu anchor={menuAt} onClose={() => setMenuAt(null)} label={t("projectMenu")}>

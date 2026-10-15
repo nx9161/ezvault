@@ -6,6 +6,7 @@
 import { useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useUiStore } from "@/lib/store/ui";
+import { CloseIcon } from "@/components/ui/icons";
 
 export function Toasts() {
   const t = useTranslations("app");
@@ -47,7 +48,7 @@ export function Toasts() {
             aria-label={t("dismiss")}
             style={{ textDecoration: "none" }}
           >
-            ✕
+            <CloseIcon size={14} />
           </button>
         </div>
       ))}

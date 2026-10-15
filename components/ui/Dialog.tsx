@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
+import { CloseIcon } from "@/components/ui/icons";
 
 interface DialogProps {
   title: string;
@@ -92,7 +93,7 @@ export function Dialog({ title, onClose, children, footer, wide }: DialogProps) 
             onClick={onClose}
             aria-label={t("close")}
           >
-            ✕
+            <CloseIcon size={14} />
           </button>
         </div>
         <div className="ez-dialog-body">{children}</div>

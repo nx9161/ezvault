@@ -12,6 +12,7 @@ import { commandBus, useCommandBus } from "@/lib/commands/bus";
 import { undoLast, redoLast, type OpContext } from "@/lib/commands/ops";
 import { useOpContext } from "@/components/sidebar/Sidebar";
 import { Dialog } from "@/components/ui/Dialog";
+import { UndoIcon, RedoIcon } from "@/components/ui/icons";
 
 function ConnChip({ label, state }: { label: string; state: "ok" | "warn" | "bad" }) {
   return (
@@ -52,7 +53,7 @@ export default function StatusBar({ projectId }: { projectId: string }) {
             aria-label={bus.undoLabel ? `${t("undo")}: ${bus.undoLabel}` : t("nothingToUndo")}
             title={t("undo")}
           >
-            ↩
+            <UndoIcon size={15} />
           </button>
           <button
             type="button"
@@ -63,7 +64,7 @@ export default function StatusBar({ projectId }: { projectId: string }) {
             aria-label={bus.redoLabel ? `${t("redo")}: ${bus.redoLabel}` : t("nothingToRedo")}
             title={t("redo")}
           >
-            ↪
+            <RedoIcon size={15} />
           </button>
           {lastAction ? <span>{t("lastAction", { label: lastAction })}</span> : null}
         </span>

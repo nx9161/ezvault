@@ -33,6 +33,7 @@ import {
 import { useOpContext } from "@/components/sidebar/Sidebar";
 import { Menu, MenuItem, MenuLabel } from "@/components/ui/Menu";
 import { ErrorCard, SkeletonCards, SkeletonRows } from "@/components/ui/Feedback";
+import { CheckIcon, SelectionCountIcon, NoteIcon } from "@/components/ui/icons";
 import { renderSnippet } from "@/lib/search-snippet";
 import type { Item, Tag } from "@/lib/api/types";
 import TrashView from "@/components/trash/TrashView";
@@ -129,14 +130,20 @@ function ItemCard({
       aria-label={`${item.title} — ${t("photosCount", { count: item.photo_count ?? 0 })}`}
     >
       <span className="ez-card-check" aria-hidden="true">
-        ✓
+        <CheckIcon size={13} />
       </span>
       <span className="ez-card-badges" aria-hidden="true">
         {item.selection_count > 0 ? (
-          <span className="ez-mini-badge">◈{item.selection_count}</span>
+          <span className="ez-mini-badge">
+            <SelectionCountIcon size={11} />
+            {item.selection_count}
+          </span>
         ) : null}
         {item.note_count > 0 ? (
-          <span className="ez-mini-badge">✎{item.note_count}</span>
+          <span className="ez-mini-badge">
+            <NoteIcon size={11} />
+            {item.note_count}
+          </span>
         ) : null}
       </span>
       {thumb ? (

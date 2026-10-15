@@ -18,6 +18,7 @@ import Subscript from "@tiptap/extension-subscript";
 import Link from "@tiptap/extension-link";
 import { patch } from "@/lib/api/client";
 import { isAllowedUri, tiptapLinkOptions } from "@/lib/link-policy";
+import { LinkIcon } from "@/components/ui/icons";
 import { mapTropyNoteState } from "@/lib/notes/tropy-schema-map";
 import { commandBus, type Command } from "@/lib/commands/bus";
 import { newClientOpId } from "@/lib/api/client";
@@ -214,9 +215,9 @@ export default function NotesEditor({
     ed.chain().focus().setLink({ href: url }).run();
   }
 
-  const btn = (label: string, active: boolean, onClick: () => void, title: string) => (
+  const btn = (label: React.ReactNode, active: boolean, onClick: () => void, title: string) => (
     <button
-      key={label}
+      key={typeof label === "string" ? label : title}
       type="button"
       className="ez-icon-btn"
       data-active={active || undefined}
@@ -240,7 +241,7 @@ export default function NotesEditor({
         {btn("❝", ed.isActive("blockquote"), () => ed.chain().focus().toggleBlockquote().run(), t("blockquote"))}
         {btn("•", ed.isActive("bulletList"), () => ed.chain().focus().toggleBulletList().run(), t("bulletList"))}
         {btn("1.", ed.isActive("orderedList"), () => ed.chain().focus().toggleOrderedList().run(), t("orderedList"))}
-        {btn("🔗", ed.isActive("link"), setLink, t("link"))}
+        {btn(<LinkIcon size={15} />, ed.isActive("link"), setLink, t("link"))}
         <span style={{ flex: 1 }} />
         <label style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11 }}>
           {t("language")}

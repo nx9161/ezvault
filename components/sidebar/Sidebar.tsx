@@ -14,6 +14,13 @@ import { useDomainStore } from "@/lib/store/domain";
 import { Menu, MenuItem, MenuSeparator } from "@/components/ui/Menu";
 import { ConfirmDialog } from "@/components/ui/Dialog";
 import { ErrorCard, SkeletonRows } from "@/components/ui/Feedback";
+import {
+  LibraryIcon,
+  TrashIcon,
+  PlusIcon,
+  ChevronRightIcon,
+  ChevronDownIcon,
+} from "@/components/ui/icons";
 import type { ListNode, Tag } from "@/lib/api/types";
 
 export const TAG_COLORS = [
@@ -86,7 +93,7 @@ function LibrarySection({ projectId }: { projectId: string }) {
         aria-current={libraryFilter === "all"}
         onClick={() => setLibraryFilter("all")}
       >
-        <span aria-hidden="true">▤</span> {t("allItems")}
+        <LibraryIcon size={15} /> {t("allItems")}
       </button>
       <button
         type="button"
@@ -94,7 +101,7 @@ function LibrarySection({ projectId }: { projectId: string }) {
         aria-current={libraryFilter === "unfiled"}
         onClick={() => setLibraryFilter("unfiled")}
       >
-        <span aria-hidden="true">⧉</span> {t("unfiled")}
+        <LibraryIcon size={15} style={{ opacity: 0.55 }} /> {t("unfiled")}
       </button>
       <button
         type="button"
@@ -105,7 +112,7 @@ function LibrarySection({ projectId }: { projectId: string }) {
           setActiveListId(null);
         }}
       >
-        <span aria-hidden="true">🗑</span> {t("trash")}
+        <TrashIcon size={15} /> {t("trash")}
         {trash && trash.length > 0 ? (
           <span className="ez-count">{trash.length}</span>
         ) : null}
@@ -226,7 +233,7 @@ function TreeRow({ node, depth, projectId, tree, ctx, collapsed, toggleCollapse,
               toggleCollapse(node.id);
             }}
           >
-            {isCollapsed ? "▸" : "▾"}
+            {isCollapsed ? <ChevronRightIcon size={13} /> : <ChevronDownIcon size={13} />}
           </span>
         ) : (
           <span className="ez-tree-toggle" aria-hidden="true" />
@@ -374,12 +381,11 @@ function ListsSection({ projectId }: { projectId: string }) {
         <button
           type="button"
           className="ez-icon-btn"
-          style={{ width: 22, height: 22 }}
           onClick={() => setCreating(true)}
           aria-label={t("newList")}
           title={t("newList")}
         >
-          +
+          <PlusIcon size={14} />
         </button>
       </h2>
       {error ? (
@@ -510,12 +516,11 @@ function TagsSection({ projectId }: { projectId: string }) {
         <button
           type="button"
           className="ez-icon-btn"
-          style={{ width: 22, height: 22 }}
           onClick={() => setCreating(true)}
           aria-label={t("newTag")}
           title={t("newTag")}
         >
-          +
+          <PlusIcon size={14} />
         </button>
       </h2>
       <p style={{ fontSize: 11, color: "var(--ink-3)", margin: "0 0 8px" }}>{t("filterHint")}</p>

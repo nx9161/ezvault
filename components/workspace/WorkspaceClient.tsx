@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
+import { LibraryIcon, ListsIcon, TagsIcon, SearchIcon, MoreIcon } from "@/components/ui/icons";
 import { useUiStore } from "@/lib/store/ui";
 import { useMeter, useCpuBudget } from "@/lib/api/hooks";
 import { ACCEPT_ATTR, detectKind } from "@/lib/import/files";
@@ -97,6 +98,7 @@ function MeterBanners({ projectId }: { projectId: string }) {
 }
 
 function MobileNav({ projectId }: { projectId: string }) {
+  const t = useTranslations("mobileNav");
   const mobileNav = useUiStore((s) => s.mobileNav);
   const setMobileNav = useUiStore((s) => s.setMobileNav);
   const setSidebarOpen = useUiStore((s) => s.setSidebarOpen);
@@ -112,19 +114,19 @@ function MobileNav({ projectId }: { projectId: string }) {
 
   const items = [
     {
-      id: "library" as const, label: "Library", icon: "▤",
+      id: "library" as const, label: t("library"), icon: LibraryIcon,
       onTap: () => { setMobileNav("library"); setLibraryFilter("all"); },
     },
     {
-      id: "lists" as const, label: "Lists", icon: "☰",
+      id: "lists" as const, label: t("lists"), icon: ListsIcon,
       onTap: () => { setMobileNav("lists"); setSidebarOpen(true); },
     },
     {
-      id: "tags" as const, label: "Tags", icon: "🏷",
+      id: "tags" as const, label: t("tags"), icon: TagsIcon,
       onTap: () => { setMobileNav("tags"); setSidebarOpen(true); },
     },
     {
-      id: "search" as const, label: "Search", icon: "🔍",
+      id: "search" as const, label: t("search"), icon: SearchIcon,
       onTap: () => {
         setMobileNav("search");
         setTimeout(() => document.getElementById("ez-global-search")?.focus(), 50);
@@ -142,7 +144,7 @@ function MobileNav({ projectId }: { projectId: string }) {
             aria-current={mobileNav === it.id}
             onClick={it.onTap}
           >
-            <span aria-hidden="true" style={{ fontSize: 18 }}>{it.icon}</span>
+            <it.icon size={18} aria-hidden="true" />
             {it.label}
           </button>
         ))}
@@ -155,8 +157,8 @@ function MobileNav({ projectId }: { projectId: string }) {
             setMenuAt({ x: r.left, y: r.top - 8 });
           }}
         >
-          <span aria-hidden="true" style={{ fontSize: 18 }}>⋯</span>
-          More
+          <MoreIcon size={18} aria-hidden="true" />
+          {t("more")}
         </button>
       </nav>
       <div className="ez-mobile-note">
