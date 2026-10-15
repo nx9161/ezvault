@@ -395,6 +395,7 @@ details.ez-collapsible > summary { padding: 8px 12px; cursor: pointer; font-size
 .ez-dialog-head h2 { font-size: 20px; margin: 0; flex: 1; }
 .ez-dialog-body { padding: 16px 20px; overflow-y: auto; }
 .ez-dialog-foot { padding: 12px 20px 16px; display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid var(--border); }
+.ez-hint { font-size: 11px; color: var(--ink-2); margin: 4px 0 0; }
 .ez-kind-cards { display: grid; gap: 8px; margin: 12px 0; }
 .ez-kind-card { display: block; text-align: left; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; background: var(--surface); cursor: pointer; font: inherit; color: inherit; }
 .ez-kind-card:hover { background: var(--wash); }

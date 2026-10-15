@@ -32,11 +32,15 @@ function FieldInput({
   value,
   onChange,
   invalid,
+  inputPlaceholder,
+  describedBy,
 }: {
   field: UiTemplateField;
   value: string;
   onChange: (v: string) => void;
   invalid: boolean;
+  inputPlaceholder?: string;
+  describedBy?: string;
 }) {
   const t = useTranslations("metadata");
   const id = `ez-field-${field.id}`;
@@ -49,7 +53,7 @@ function FieldInput({
       onChange(e.target.value),
     "aria-required": required || undefined,
     "aria-invalid": invalid || undefined,
-    "aria-describedby": invalid ? `${id}-error` : undefined,
+    "aria-describedby": describedBy ?? (invalid ? `${id}-error` : undefined),
     title: t("propertyUri", { uri: field.property_uri }),
   };
   return (
@@ -59,16 +63,16 @@ function FieldInput({
         {required ? <span aria-hidden="true"> *</span> : null}
       </label>
       {field.widget === "textarea" ? (
-        <textarea className="ez-textarea" rows={3} {...common} />
+        <textarea className="ez-textarea" rows={3} placeholder={inputPlaceholder} {...common} />
       ) : field.widget === "number" ? (
-        <input className="ez-input" type="number" {...common} />
+        <input className="ez-input" type="number" placeholder={inputPlaceholder} {...common} />
       ) : field.widget === "uri" ? (
-        <input className="ez-input" type="url" inputMode="url" {...common} />
+        <input className="ez-input" type="url" inputMode="url" placeholder={inputPlaceholder} {...common} />
       ) : field.widget === "date" ? (
         <input
           className="ez-input"
           type="text"
-          placeholder="YYYY-MM-DD"
+          placeholder={inputPlaceholder ?? "YYYY-MM-DD"}
           {...common}
         />
       ) : field.widget === "boolean" ? (
@@ -79,9 +83,10 @@ function FieldInput({
           checked={value === "true"}
           onChange={(e) => onChange(e.target.checked ? "true" : "false")}
           aria-required={required || undefined}
+          aria-describedby={describedBy}
         />
       ) : (
-        <input className="ez-input" type="text" {...common} />
+        <input className="ez-input" type="text" placeholder={inputPlaceholder} {...common} />
       )}
       <span className="ez-uri" aria-hidden="true">
         {field.property_uri}
@@ -259,6 +264,7 @@ export default function MetadataForm({
         const singleValue = bulk
           ? (mixed ? "" : (bulkValues[uri]?.[0] ?? ""))
           : (values[uri] ?? "");
+        const hintId = `mixed-hint-${field.id}`;
         return (
           <div key={field.id} className={bulk ? "ez-bulk-row" : undefined}>
             <FieldInput
@@ -266,7 +272,14 @@ export default function MetadataForm({
               value={bulk ? (values[uri] ?? "") : singleValue}
               onChange={(v) => setValues((prev) => ({ ...prev, [uri]: v }))}
               invalid={rightsError && isRightsField(field)}
+              inputPlaceholder={mixed ? t("mixed") : undefined}
+              describedBy={mixed ? hintId : undefined}
             />
+            {mixed ? (
+              <p id={hintId} className="ez-hint">
+                {t("mixedHint")}
+              </p>
+            ) : null}
             {bulk ? (
               <label className="ez-apply-check" style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11 }}>
                 <input
