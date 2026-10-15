@@ -1,5 +1,12 @@
 # QA Report — War Room Phase 4, Project EZVault (v1)
 
+> **SHA supersession notice (2026-10-15, post-build audit):** all commit
+> authors were rewritten to `Naman Parmar <namanparmar9161@gmail.com>` (Vercel
+> Hobby requires the team owner's identity on every commit, else it blocks
+> the deploy). Subjects and trees are unchanged; only SHAs moved.
+> Mapping for SHAs cited below: `465d802` → `f374e67`,
+> `ffe5436` → `fbc55a0`. `git log` carries the new SHAs.
+
 **Seat:** QA Manager (10) · **Date:** 2026-10-14 · **Tree:** `main` @ `465d802` (clean, 8 commits)
 **Verdict: BLOCK** — Round 1 of 3. Six binding findings below; builders fix, QA re-verifies.
 
