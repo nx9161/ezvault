@@ -105,3 +105,28 @@ and the bucket directly), but it needs the GitHub secrets
 Restoring is documented in `docs/RUNBOOK.md` (scratch database only,
 never over live). "Delete everything" (live purge endpoint + manual
 MASTER_KEY destruction for backups) is also in `docs/RUNBOOK.md`.
+
+## 8. Post-deploy verifications (Wave 2 W2-E — owner-blocked)
+
+Everything in this section requires the live infrastructure from §§1–4
+(Neon project, both R2 buckets, Vercel project with Authentication on
+All Deployments). Until those taps land, each item stays **OWNER-BLOCKED**
+— nothing here is silently dropped; run each one as soon as its
+prerequisite is live, and flip its line to `DONE (date)` when it passes.
+
+| ID | Verification | Prerequisite tap |
+|----|--------------|------------------|
+| H1 | **CSP vs real R2 host** — load the app against the real `*.r2.dev`/custom R2 host and confirm no CSP violations block image/asset fetches (browser console clean, thumbnails render). | R2 buckets |
+| H2 | **Rate-limit concurrency** — burst concurrent requests at a rate-limited route and confirm 429s are returned correctly without the limiter collapsing under concurrency. | Vercel project |
+| H4 | **Presigned round-trips** — full upload→download cycle against the real bucket through presigned URLs (PUT then GET), confirming credentials scope and CORS. | R2 buckets |
+| H5 | **302/cache-control at edge** — verify asset redirects return 302 (not cached 200s) and `Cache-Control` headers are correct at the Vercel edge. | Vercel project |
+| H8 | **`maxDuration: 300` honored** — trigger a long-running route (import worker) and confirm the platform honors the 300s `maxDuration` rather than killing the function early. | Vercel project |
+| H9 | **Neon transactions under load** — concurrent transactional writes (e.g. import batches) against the live Neon project; confirm no serialization anomalies or connection-pool exhaustion. | Neon project |
+| H6 | **`.tpy` 48/48 e2e in preview** — import the 48-item DHUM `.tpy` fixture end-to-end in the preview deployment and confirm 48/48 items land with photos, metadata, and tags intact. | Vercel project + R2 buckets |
+| H7 | **First backup run + restore spot check** — run the `backup-monthly` workflow once for real, then restore a spot-check subset to a scratch database (per `docs/RUNBOOK.md`) and confirm byte-identical blobs. | R2 buckets + Neon project |
+
+Also live from Wave 1 carry-over: the A1 FTS warm p95<500ms **re-verify
+against production** (Dossier H3) — the migration header documents the
+PGlite harness number (139ms scope=all); the harness is not a production
+SLA. Run the same 200-query warm measurement against the live route and
+confirm p95 stays under 500ms.
