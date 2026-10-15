@@ -47,6 +47,19 @@ function walk(dir, depth = 0) {
       const lic = licenseOf(p);
       if (DENY.some((re) => re.test(lic))) bad.push(`${p.replace(NM + '/', '')}: ${lic}`);
       else if (WARN.some((re) => re.test(lic))) warn.push(`${p.replace(NM + '/', '')}: ${lic}`);
+      // RE audit: package.json can claim MIT while the shipped LICENSE text
+      // carries strong copyleft (dual-license addenda). Scan the license
+      // text itself for the tell-tale grants.
+      for (const lf of readdirSync(p).filter((f) => /^LICENSE/i.test(f))) {
+        let text = '';
+        try { text = readFileSync(join(p, lf), 'utf8').slice(0, 4000); } catch { /* unreadable */ }
+        // Title-on-its-own-line only: avoids MPL-2.0 boilerplate, which
+        // *defines* "Secondary License" as GPL/LGPL/AGPL mid-sentence.
+        const m = text.match(/^\s{0,20}GNU (GENERAL|LESSER|AFFERO) PUBLIC LICENSE\s*$/im);
+        if (m && !/MIT License/i.test(text.slice(0, 500))) {
+          warn.push(`${p.replace(NM + '/', '')}: license-text carries "${m[0].trim()}" (${lf})`);
+        }
+      }
     }
     // Recurse everywhere: @scoped dirs (no package.json of their own —
     // previously never scanned), nested node_modules, bundled deps.

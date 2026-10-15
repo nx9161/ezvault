@@ -922,7 +922,6 @@ async function importTpyPhotoAsset(
     });
     // Finalize the tpy linkage: md5 recorded, placeholder flags cleared.
     await sql()`UPDATE photos SET tpy_checksum_md5 = ${ph.md5 || null}, missing_original = false WHERE subject_id = ${newId}`;
-    void newIds;
   } catch (err) {
     conflicts.push({ tpy_id: s.tpy_id, kind: 'photo', reason: 'process_failed', detail: String(err).slice(0, 200) });
     await sql()`UPDATE import_jobs SET failed = failed + 1, updated_at = now() WHERE id = ${jobId}`;

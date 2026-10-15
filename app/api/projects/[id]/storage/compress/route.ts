@@ -106,8 +106,11 @@ export const POST = handle(async (req: Request, ctx: Ctx) => {
       const newHash = createHash('sha256').update(compressed).digest('hex');
       const delta = original.length - compressed.length;
       await tx((q) => [
+        // checksum_sha256 keeps the ORIGINAL bytes' hash (upload-dedupe
+        // identity — overwriting it broke re-upload dedupe); the hash of
+        // the stored WebP bytes goes in compressed_sha256.
         q(`UPDATE photos SET r2_key = $2, mimetype = 'image/webp',
-             checksum_sha256 = $3, size_bytes = $4 WHERE subject_id = $1`,
+             compressed_sha256 = $3, size_bytes = $4 WHERE subject_id = $1`,
           [subjectId, tmpKey, newHash, compressed.length]),
         // Lock order honored inside tx(): counters first, then jobs/photos.
         q(`UPDATE storage_counters SET bytes_originals = GREATEST(0, bytes_originals - $2),
@@ -127,10 +130,10 @@ export const POST = handle(async (req: Request, ctx: Ctx) => {
       results.push({ photo_subject_id: subjectId, status: 'compressed', bytes_saved: delta });
     } catch (err) {
       if (err instanceof HttpError && err.status === 503) throw err; // CPU guard — stop the run
-      results.push({
-        photo_subject_id: subjectId,
-        status: `failed:${err instanceof Error ? err.message : 'unknown'}`,
-      });
+      // F-B2: generic per-photo status — the sharp/R2 detail is logged
+      // server-side, never reflected to the client.
+      console.error('compress: photo failed:', subjectId, err);
+      results.push({ photo_subject_id: subjectId, status: 'failed' });
     }
   }
   return ok({ mode, results, processed: results.length, ...meta });
