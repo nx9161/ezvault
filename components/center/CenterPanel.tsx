@@ -133,7 +133,14 @@ function ItemCard({
       <span className="ez-card-check" aria-hidden="true">
         ✓
       </span>
-
+      <span className="ez-card-badges" aria-hidden="true">
+        {item.selection_count > 0 ? (
+          <span className="ez-mini-badge">◈{item.selection_count}</span>
+        ) : null}
+        {item.note_count > 0 ? (
+          <span className="ez-mini-badge">✎{item.note_count}</span>
+        ) : null}
+      </span>
       {thumb ? (
         <img
           className="ez-card-cover"

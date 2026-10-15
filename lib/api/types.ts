@@ -93,6 +93,8 @@ export interface Item {
   title: string;
   cover_photo_id: Id | null;
   photo_count: number;
+  selection_count: number;
+  note_count: number;
   tags: string[];
   lists: Id[];
   created_at: string;
@@ -100,9 +102,7 @@ export interface Item {
 }
 
 type WireItem = BackendItem & {
-  photo_count?: number;
   title?: string | null;
-  cover_image_id?: string | null;
   tags?: string[];
   lists?: { list_id: string }[] | string[] | null;
 };
@@ -118,6 +118,8 @@ export function adaptItem(raw: WireItem): Item {
     title: raw.title?.trim() || `Item ${raw.subject_id.slice(0, 8)}`,
     cover_photo_id: raw.cover_image_id ?? null,
     photo_count: raw.photo_count ?? 0,
+    selection_count: raw.selection_count ?? 0,
+    note_count: raw.note_count ?? 0,
     tags: raw.tags ?? [],
     lists,
     created_at: raw.created_at,
@@ -185,6 +187,7 @@ export interface Selection {
   h: number;
   template_id: Id | null;
   position: number;
+  note_count: number;
 }
 
 export function adaptSelection(raw: BackendSelection): Selection {
@@ -198,6 +201,7 @@ export function adaptSelection(raw: BackendSelection): Selection {
     h: raw.height,
     template_id: raw.template_id,
     position: raw.position,
+    note_count: raw.note_count ?? 0,
   };
 }
 

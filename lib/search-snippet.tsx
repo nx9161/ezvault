@@ -1,13 +1,19 @@
 // SPDX-License-Identifier: MIT
-// Search snippet rendering (build gate B14).
+// Search snippet rendering (build gate B14; CONTRACT.md "Search snippet
+// contract" — binding wire format).
 //
-// The server HTML-escapes the whole headline and marks hits with unique
-// sentinel tokens (`SEARCH_SENTINEL_START/END` in lib/types.ts); per B14 the
-// handler then swaps sentinels for `<mark>`. Either form may arrive — this
-// module renders BOTH safely as React nodes, never via
-// dangerouslySetInnerHTML. Any other markup in the payload is treated as
-// literal text (React-escaped), so a compromised or buggy server cannot
-// inject elements or attributes.
+// Wire format: the server HTML-escapes the whole ts_headline, then swaps the
+// unique sentinel tokens for `<mark>`/`</mark>` — the payload arriving here
+// is safe HTML containing ONLY `<mark>` elements. This module renders those
+// highlights as React `<mark>` nodes — never via dangerouslySetInnerHTML,
+// never rendering raw HTML. Any other markup in the payload is treated as
+// literal text (React-escaped), so a buggy or compromised server cannot
+// inject elements or attributes; visual output is identical to rendering
+// the payload as-is for conforming input.
+//
+// The sentinel branch below is a defensive fallback (sentinels never appear
+// in the wire payload per the contract); it renders them safely rather than
+// leaking raw tokens into the UI.
 
 import type { ReactNode } from "react";
 import { SEARCH_SENTINEL_START, SEARCH_SENTINEL_END } from "@/lib/types";

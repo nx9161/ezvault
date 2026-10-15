@@ -109,6 +109,11 @@ function SelectionCard({
             {selection.name}
           </strong>
         )}
+        {selection.note_count > 0 ? (
+          <span className="ez-mini-badge" aria-label={t("notesCount", { count: selection.note_count })}>
+            ✎{selection.note_count}
+          </span>
+        ) : null}
         <button
           type="button"
           className="ez-icon-btn"
