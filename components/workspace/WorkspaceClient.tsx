@@ -31,15 +31,27 @@ import SettingsDialog from "@/components/settings/SettingsDialog";
 import TemplatesDialog from "@/components/templates/TemplatesDialog";
 import { useOpContext } from "@/components/sidebar/Sidebar";
 
-function Splitter({ onResize, label }: { onResize: (dx: number) => void; label: string }) {
+// S-4: accessible splitter — separator role with valuenow/min/max from the
+// store widths; Arrow keys nudge, Home/End jump to min/max.
+function Splitter({ kind }: { kind: "sidebar" | "inspector" }) {
+  const t = useTranslations("app");
   const startX = useRef(0);
   const dragging = useRef(false);
+  const width = useUiStore((s) => (kind === "sidebar" ? s.sidebarWidth : s.inspectorWidth));
+  const setWidth = useUiStore((s) => (kind === "sidebar" ? s.setSidebarWidth : s.setInspectorWidth));
+  const min = kind === "sidebar" ? 220 : 340;
+  const max = kind === "sidebar" ? 360 : 640;
+  // The inspector splitter sits on its left edge: dragging right shrinks it.
+  const resize = (dx: number) => setWidth(width + (kind === "sidebar" ? dx : -dx));
   return (
     <div
       className="ez-splitter"
       role="separator"
       aria-orientation="vertical"
-      aria-label={label}
+      aria-label={kind === "sidebar" ? t("resizeSidebar") : t("resizeInspector")}
+      aria-valuenow={Math.round(width)}
+      aria-valuemin={min}
+      aria-valuemax={max}
       tabIndex={0}
       onPointerDown={(e) => {
         dragging.current = true;
@@ -48,15 +60,19 @@ function Splitter({ onResize, label }: { onResize: (dx: number) => void; label: 
       }}
       onPointerMove={(e) => {
         if (!dragging.current) return;
-        onResize(e.clientX - startX.current);
+        resize(e.clientX - startX.current);
         startX.current = e.clientX;
       }}
       onPointerUp={() => {
         dragging.current = false;
       }}
       onKeyDown={(e) => {
-        if (e.key === "ArrowLeft") onResize(-8);
-        else if (e.key === "ArrowRight") onResize(8);
+        if (e.key === "ArrowLeft") resize(-8);
+        else if (e.key === "ArrowRight") resize(8);
+        else if (e.key === "Home") setWidth(min);
+        else if (e.key === "End") setWidth(max);
+        else return;
+        e.preventDefault();
       }}
     />
   );
@@ -255,10 +271,6 @@ export default function WorkspaceClient({ projectId }: { projectId: string }) {
   const ctx = useOpContext(projectId);
   // D-INTc: global bindings live in lib/shortcuts/registry.ts, bound by
   // <RegisteredHotkeys/> rendered below (replaces useGlobalShortcuts).
-  const sidebarWidth = useUiStore((s) => s.sidebarWidth);
-  const setSidebarWidth = useUiStore((s) => s.setSidebarWidth);
-  const inspectorWidth = useUiStore((s) => s.inspectorWidth);
-  const setInspectorWidth = useUiStore((s) => s.setInspectorWidth);
   void ACCEPT_ATTR;
 
   return (
@@ -271,9 +283,9 @@ export default function WorkspaceClient({ projectId }: { projectId: string }) {
       <MeterBanners projectId={projectId} />
       <div className="ez-workspace">
         <Sidebar projectId={projectId} />
-        <Splitter onResize={(dx) => setSidebarWidth(sidebarWidth + dx)} label="sidebar" />
+        <Splitter kind="sidebar" />
         <CenterPanel projectId={projectId} />
-        <Splitter onResize={(dx) => setInspectorWidth(inspectorWidth - dx)} label="inspector" />
+        <Splitter kind="inspector" />
         <Inspector projectId={projectId} />
       </div>
       <StatusBar projectId={projectId} />

@@ -294,6 +294,18 @@ function ItemGrid({
     e.preventDefault();
     const nextItem = items[next];
     setFocusId(nextItem.id);
+    // S-3: Shift+Arrow/Home/End extends the selection from the anchor.
+    if (e.shiftKey) {
+      const anchor = anchorRef.current ?? items[idx].id;
+      anchorRef.current = anchor;
+      selectRange(
+        items.map((it) => it.id),
+        anchor,
+        nextItem.id,
+      );
+    } else {
+      anchorRef.current = nextItem.id;
+    }
     virtualizer.scrollToIndex(next, { align: "auto" });
     requestAnimationFrame(() => refs.current.get(nextItem.id)?.focus());
   }
