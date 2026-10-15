@@ -49,12 +49,24 @@ export const GET = handle(async (req: Request) => {
       }
     }
   }
-  const oldJobs = await sql()`SELECT id FROM import_jobs
-    WHERE kind = 'tpy' AND status IN ('done','cancelled') AND updated_at < now() - interval '7 days'`;
-  for (const j of oldJobs) {
-    for (const key of await storage.listKeys(`tpy-staging/${j['id']}/`)) {
+  // A6: tpy-staging sweep completeness — done/cancelled/failed jobs older
+  // than 7 days, PLUS jobs abandoned in queued/running with no activity for
+  // 7 days (their staging is unrecoverable; flip them to failed with a
+  // readable error so the job-state API explains it instead of 404ing on a
+  // missing import.jsonl at Run time).
+  const oldTpyJobs = await sql()`SELECT id, status FROM import_jobs
+    WHERE kind = 'tpy'
+      AND (status IN ('done','cancelled','failed') OR updated_at < now() - interval '7 days')`;
+  for (const j of oldTpyJobs) {
+    const jobId = j['id'] as string;
+    for (const key of await storage.listKeys(`tpy-staging/${jobId}/`)) {
       await storage.delete(key).catch(() => {});
       stagedDeleted++;
+    }
+    if (j['status'] === 'queued' || j['status'] === 'running') {
+      await sql()`UPDATE import_jobs SET status = 'failed',
+        error = 'abandoned: no client progress for 7d; staged files swept',
+        updated_at = now() WHERE id = ${jobId}`;
     }
   }
   report['staged_deleted'] = stagedDeleted;
@@ -86,6 +98,35 @@ export const GET = handle(async (req: Request) => {
     WHERE status = 'running' AND updated_at < now() - interval '24 hours'
     RETURNING id`;
   report['queue_tick_failed'] = stale.length;
+
+  // A6: presign-orphan sweep. 'queued' upload/folder jobs are presigned
+  // grants whose /complete (or first /run) never came. Their staged bytes
+  // are swept by the 24h uploads/ pass, so after 24h of no client activity
+  // the job can never complete — fail it with a readable error instead of
+  // leaving it queued forever. A job with ANY staged object newer than 24h
+  // is still being uploaded: heartbeat it instead of failing.
+  const staleQueued = await sql()`SELECT id FROM import_jobs
+    WHERE kind IN ('upload','folder') AND status = 'queued'
+      AND updated_at < now() - interval '24 hours'`;
+  let orphansFailed = 0;
+  for (const j of staleQueued) {
+    const jobId = j['id'] as string;
+    let fresh = false;
+    for (const key of await storage.listKeys(`uploads/${jobId}/`)) {
+      const head = await storage.head(key).catch(() => null);
+      const mtime = head?.lastModified ? Date.parse(head.lastModified) : 0;
+      if (mtime && now - mtime <= 24 * 3600 * 1000) { fresh = true; break; }
+    }
+    if (fresh) {
+      await sql()`UPDATE import_jobs SET updated_at = now() WHERE id = ${jobId}`;
+    } else {
+      await sql()`UPDATE import_jobs SET status = 'failed',
+        error = 'presign expired: upload never completed (staged files swept after 24h)',
+        updated_at = now() WHERE id = ${jobId}`;
+      orphansFailed++;
+    }
+  }
+  report['queue_orphans_failed'] = orphansFailed;
 
   // 4. Export expiry (7-day lifecycle, server-enforced).
   let exportsDeleted = 0;

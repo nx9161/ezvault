@@ -29,7 +29,6 @@ import { getStorageDriver, keys, extForMimetype } from '../storage/driver';
 import { detectFormat, magicMatchesMimetype, mimetypeForFormat } from './magic';
 import { isAllowedUploadMimetype, MAX_INPUT_PIXELS, MAGIC_PROBE_BYTES } from './validation';
 import { sanitizeSvg, SvgRejectedError } from './svg-sanitize';
-import { renderThumb } from '../export/bake';
 import { sql, tx, bumpRevQuery, bumpCountersQuery } from '../db/index';
 import { checkCpuGuard, chargeCpu } from '../cpu-budget';
 import { HttpError } from '../api/route-utils';
@@ -157,10 +156,14 @@ export async function processPhoto(input: ProcessPhotoInput): Promise<ProcessedP
   }
 
   // B5: dimension pre-check before full decode + pixel cap on the pipeline.
+  // A6: one sharp instance for metadata() AND the thumbnail — the header
+  // decode is shared instead of renderThumb() spinning a second instance
+  // over the same bytes (equivalent output: rotate + 1600px WebP q80).
   const { default: sharp } = await import('sharp');
+  const pipeline = sharp(decodeBytes, { limitInputPixels: MAX_INPUT_PIXELS });
   let meta;
   try {
-    meta = await sharp(decodeBytes, { limitInputPixels: MAX_INPUT_PIXELS }).metadata();
+    meta = await pipeline.metadata();
   } catch {
     throw new HttpError(422, 'undecodable', 'image could not be decoded');
   }
@@ -170,7 +173,11 @@ export async function processPhoto(input: ProcessPhotoInput): Promise<ProcessedP
     throw new HttpError(422, 'too_many_pixels', `image exceeds the ${MAX_INPUT_PIXELS}px input cap`);
   }
 
-  const thumbBytes = await renderThumb(decodeBytes);
+  const thumbBytes = await pipeline
+    .rotate()
+    .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
+    .webp({ quality: 80 })
+    .toBuffer();
 
   // EXIF: server-side sharp for non-HEIC; client-supplied for HEIC (ADR-2.16).
   let exif: Record<string, unknown> = {};

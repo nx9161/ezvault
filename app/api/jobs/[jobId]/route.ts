@@ -1,36 +1,33 @@
 // SPDX-License-Identifier: MIT
+import 'server-only';
 import { handle, ok, parseJson, HttpError } from '@/lib/api/route-utils';
 import { sql, tx } from '@/lib/db/index';
+import { assertJobExists, getJobState } from '@/lib/api/jobs';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 type Ctx = { params: Promise<{ jobId: string }> };
 
-async function getJob(jobId: string) {
-  const rows = await sql()`SELECT * FROM import_jobs WHERE id = ${jobId}`;
-  if (!rows.length) throw new HttpError(404, 'not_found', 'job not found');
-  return rows[0];
-}
-
-/** Job status: totals, done/failed so far, checkpoint, CPU consumed. */
+/**
+ * GET /api/jobs/[jobId] — job state for the client (rendered progress UI).
+ *
+ * Failure contract (for the frontend builder): when the job failed,
+ * `error` (string | null) carries the human-readable reason (e.g.
+ * 'idle timeout: no client progress for 24h',
+ * 'presign expired: upload never completed (staged files swept after
+ * 24h)', 'abandoned: no client progress for 7d; staged files swept').
+ * Render it verbatim whenever non-null. The column is `error`, NOT `err`.
+ */
 export const GET = handle(async (_req: Request, ctx: Ctx) => {
   const { jobId } = await ctx.params;
-  const j = await getJob(jobId);
-  const subjectCount = await sql()`SELECT COUNT(*)::int AS c FROM tpy_import_map WHERE job_id = ${jobId}`;
-  return ok({
-    id: j['id'], project_id: j['project_id'], kind: j['kind'], status: j['status'],
-    total: Number(j['total']), done: Number(j['done']), failed: Number(j['failed']),
-    checkpoint: j['checkpoint'] ?? {}, cpu_seconds: Number(j['cpu_seconds'] ?? 0),
-    subjects_imported: Number(subjectCount[0]['c'] ?? 0),
-    error: j['error'], created_at: j['created_at'], updated_at: j['updated_at'],
-  });
+  return ok(await getJobState(jobId));
 });
 
 /** Client heartbeat — merge into the job checkpoint (progress reporting). */
 export const POST = handle(async (req: Request, ctx: Ctx) => {
   const { jobId } = await ctx.params;
-  await getJob(jobId);
+  await assertJobExists(jobId);
   const body = await parseJson<{ checkpoint?: Record<string, unknown> }>(req);
   const checkpoint = body.checkpoint ?? {};
   if (typeof checkpoint !== 'object' || Array.isArray(checkpoint)) {
@@ -41,6 +38,7 @@ export const POST = handle(async (req: Request, ctx: Ctx) => {
     qq(`UPDATE import_jobs SET checkpoint = COALESCE(checkpoint,'{}'::jsonb) || $2::jsonb,
         updated_at = now() WHERE id = $1`, [jobId, JSON.stringify(checkpoint)]),
   ]);
-  const j = await getJob(jobId);
+  const rows = await sql()`SELECT id, status, checkpoint FROM import_jobs WHERE id = ${jobId}`;
+  const j = rows[0];
   return ok({ id: j['id'], status: j['status'], checkpoint: j['checkpoint'] ?? {} });
 });
