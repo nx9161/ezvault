@@ -269,7 +269,7 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
       </div>
 
       {step === "upload" ? (
-        <div>
+        <div data-tour="tpy-upload">
           <p className="ez-notice">{t("tpyHint")}</p>
           <p className="ez-notice">{t("mobileWarning")}</p>
           {projectKind === null ? (
@@ -405,13 +405,13 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
       ) : null}
 
       {step === "analyze" ? (
-        <div className="ez-state" style={{ height: "auto" }}>
+        <div className="ez-state" style={{ height: "auto" }} data-tour="tpy-analyze">
           <p>{progress || t("analyzing")}</p>
         </div>
       ) : null}
 
       {step === "map" && report ? (
-        <div>
+        <div data-tour="tpy-map">
           {report.application_id_ok ? null : (
             <div className="ez-banner" data-kind="warn" style={{ borderRadius: 8 }}>
               <span>{t("notTpyAppId")}</span>
@@ -475,7 +475,7 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
       ) : null}
 
       {step === "run" ? (
-        <div>
+        <div data-tour="tpy-run">
           <div className="ez-job-row">
             <span className="ez-progress">
               <span style={{ width: runJob && runJob.total ? `${Math.round((runJob.done / runJob.total) * 100)}%` : "0%" }} />
@@ -489,7 +489,7 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
       ) : null}
 
       {step === "report" ? (
-        <div>
+        <div data-tour="tpy-report">
           <h3 style={{ fontSize: 16 }}>{t("reportTitle")}</h3>
           {runReport ? (
             <>

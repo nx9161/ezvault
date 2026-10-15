@@ -495,7 +495,7 @@ function ListsSection({ projectId }: { projectId: string }) {
   }
 
   return (
-    <section className="ez-side-section" aria-label={t("lists")}>
+    <section className="ez-side-section" aria-label={t("lists")} data-tour="sidebar-lists">
       <h2>
         {t("lists")}
         <button
@@ -639,7 +639,7 @@ function TagsSection({ projectId }: { projectId: string }) {
   }
 
   return (
-    <section className="ez-side-section" aria-label={t("tags")}>
+    <section className="ez-side-section" aria-label={t("tags")} data-tour="sidebar-tags">
       <h2>
         {t("tags")}
         <button

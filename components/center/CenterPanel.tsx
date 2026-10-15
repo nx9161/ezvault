@@ -31,6 +31,7 @@ import {
   type OpContext,
 } from "@/lib/commands/ops";
 import { useOpContext } from "@/components/sidebar/Sidebar";
+import { startTour } from "@/lib/tour/launcher";
 import { Menu, MenuItem, MenuLabel } from "@/components/ui/Menu";
 import { ErrorCard, SkeletonCards, SkeletonRows } from "@/components/ui/Feedback";
 import { CheckIcon, SelectionCountIcon, NoteIcon } from "@/components/ui/icons";
@@ -298,6 +299,7 @@ function ItemGrid({
       role="listbox"
       aria-multiselectable="true"
       aria-label={label}
+      data-tour="item-grid"
       tabIndex={-1}
     >
       <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
@@ -366,7 +368,7 @@ function ItemTable({ items, projectId, label }: { items: Item[]; projectId: stri
   };
 
   return (
-    <div ref={parentRef} className="ez-table-wrap" id="ez-grid" tabIndex={-1} role="grid" aria-label={label}>
+    <div ref={parentRef} className="ez-table-wrap" id="ez-grid" tabIndex={-1} role="grid" aria-label={label} data-tour="item-grid">
       <div
         role="row"
         style={{
@@ -727,6 +729,7 @@ function SearchResults({ projectId }: { projectId: string }) {
 
 export default function CenterPanel({ projectId }: { projectId: string }) {
   const t = useTranslations("center");
+  const ts = useTranslations("shortcuts");
   const view = useUiStore((s) => s.view);
   const setView = useUiStore((s) => s.setView);
   const density = useUiStore((s) => s.density);
@@ -842,6 +845,13 @@ export default function CenterPanel({ projectId }: { projectId: string }) {
               {t("importTpyLink")}
             </button>
           </div>
+          <button
+            type="button"
+            className="ez-quiet-link"
+            onClick={() => startTour()}
+          >
+            {ts("takeTour")}
+          </button>
         </div>
       ) : items.length === 0 ? (
         <div className="ez-state">

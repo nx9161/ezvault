@@ -535,7 +535,7 @@ export default function PhotoViewer({
 
   return (
     <div>
-      <div className="ez-viewer-toolbar" role="toolbar" aria-label="viewer">
+      <div className="ez-viewer-toolbar" role="toolbar" aria-label="viewer" data-tour="viewer-toolbar">
         <button type="button" className="ez-icon-btn" onClick={() => {
           const r = overlayRef.current!.getBoundingClientRect();
           zoomAt(r.width / 2, r.height / 2, 1.25);

@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import { startTour } from "@/lib/tour/launcher";
 import { useUiStore } from "@/lib/store/ui";
 import { useProject, useTemplates, key } from "@/lib/api/hooks";
 import { patch, del } from "@/lib/api/client";
@@ -18,6 +19,7 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
   const t = useTranslations("settings");
   const ta = useTranslations("app");
   const ti = useTranslations("import");
+  const ts = useTranslations("shortcuts");
   const open = useUiStore((s) => s.settingsOpen);
   const setOpen = useUiStore((s) => s.setSettingsOpen);
   const pushToast = useUiStore((s) => s.pushToast);
@@ -136,6 +138,19 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
               <option value="html">{t("notesHtml")}</option>
               <option value="markdown">{t("notesMarkdown")}</option>
             </select>
+          </div>
+          <div className="ez-field">
+            <span className="ez-field-label">{t("help")}</span>
+            <button
+              type="button"
+              className="ez-btn ez-btn--sm"
+              onClick={() => {
+                setOpen(false);
+                startTour();
+              }}
+            >
+              {ts("takeTour")}
+            </button>
           </div>
         </>
       )}

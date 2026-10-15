@@ -14,7 +14,7 @@ import {
 
 function BoundHotkey({ entry, ctx }: { entry: HotkeyEntry; ctx: HotkeyContext }) {
   useHotkeys(
-    entry.keys,
+    entry.keys ?? "",
     () => {
       void entry.run?.(ctx);
     },
@@ -39,7 +39,7 @@ export function RegisteredHotkeys({
   const hotkeyCtx: HotkeyContext = { projectId, ctx };
   return (
     <>
-      {HOTKEY_REGISTRY.filter((e) => e.scope === "global" && e.run).map(
+      {HOTKEY_REGISTRY.filter((e) => e.scope === "global" && e.run && e.keys).map(
         (entry) => (
           <BoundHotkey key={entry.id} entry={entry} ctx={hotkeyCtx} />
         ),

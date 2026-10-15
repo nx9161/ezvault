@@ -490,7 +490,7 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
       onClose={() => setOpen(false)}
       wide
     >
-      <div className="ez-tabs" role="tablist" aria-label={t("title")} style={{ marginTop: 0 }}>
+      <div className="ez-tabs" role="tablist" aria-label={t("title")} style={{ marginTop: 0 }} data-tour="import-tabs">
         {(["files", "folder", "jsonld"] as Tab[]).map((id) => (
           <button
             key={id}
@@ -568,7 +568,7 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
       {queue.length > 0 ? (
         <div style={{ margin: "12px 0" }}>
           <h3 style={{ fontSize: 13 }}>{t("reviewTitle", { count: queue.length })}</h3>
-          <div style={{ maxHeight: 260, overflowY: "auto" }}>
+          <div style={{ maxHeight: 260, overflowY: "auto" }} data-tour="import-review">
             {queue.map((qf) => (
               <div key={qf.localId} className="ez-file-row">
                 <span className="ez-name" title={qf.relativePath ?? qf.file.name}>

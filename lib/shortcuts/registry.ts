@@ -13,6 +13,7 @@
 import { useUiStore } from "@/lib/store/ui";
 import { useDomainStore } from "@/lib/store/domain";
 import { commandBus } from "@/lib/commands/bus";
+import { startTour } from "@/lib/tour/launcher";
 import {
   runCommand,
   trashSubjectsOp,
@@ -32,8 +33,8 @@ export type HotkeyScope = "global" | "viewer";
 
 export interface HotkeyEntry {
   id: string;
-  /** react-hotkeys-hook key syntax, e.g. "mod+shift+i" or ["mod+shift+z","mod+y"] */
-  keys: string | string[];
+  /** react-hotkeys-hook key syntax; absent for palette-only actions (tour) */
+  keys?: string | string[];
   scope: HotkeyScope;
   group: HotkeyGroup;
   /** shortcuts.* i18n key */
@@ -142,6 +143,16 @@ export const HOTKEY_REGISTRY: HotkeyEntry[] = [
       const ui = useUiStore.getState();
       ui.setView(ui.view === "grid" ? "table" : "grid");
     },
+  },
+  {
+    id: "takeTour",
+    scope: "global",
+    group: "general",
+    labelKey: "takeTour",
+    hint: "⌘K",
+    // Palette-only action (D-INTb): no key binding of its own; run it from
+    // the palette, the project menu, Settings, or the empty-library link.
+    run: () => startTour(),
   },
   // ---------- organize ----------
   {

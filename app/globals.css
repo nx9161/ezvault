@@ -179,7 +179,10 @@ body {
 .ez-input:focus, .ez-select:focus, .ez-textarea:focus { border-color: var(--accent); outline: none; }
 .ez-input[aria-invalid="true"], .ez-select[aria-invalid="true"] { border-color: var(--danger); }
 .ez-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
-.ez-field > label { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.ez-field > label, .ez-field-label { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+/* D-INTb: quiet text-button for secondary entry points (empty-library tour link) */
+.ez-quiet-link { background: none; border: 0; padding: 0; margin-top: 12px; font: inherit; font-size: 12px; color: var(--ink-3); text-decoration: underline; cursor: pointer; }
+.ez-quiet-link:hover { color: var(--accent-strong); }
 .ez-field .ez-hint { font-size: 11px; color: var(--ink-3); }
 .ez-field .ez-error { font-size: 11px; color: var(--danger); }
 .ez-field .ez-uri { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); }

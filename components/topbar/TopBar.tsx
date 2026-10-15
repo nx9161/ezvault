@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl";
 import { useUiStore } from "@/lib/store/ui";
 import { useMeter, useProject } from "@/lib/api/hooks";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "@/components/ui/Menu";
+import { startTour } from "@/lib/tour/launcher";
 import { GridIcon, TableIcon, ThemeIcon, ChevronDownIcon } from "@/components/ui/icons";
 
 import { VaultMark } from "@/components/ui/icons";
@@ -43,6 +44,7 @@ function SearchBox() {
         role="searchbox"
         aria-label={t("searchLabel")}
         placeholder={t("searchPlaceholder")}
+        data-tour="global-search"
         value={searchBox}
         onChange={(e) => setSearchBox(e.target.value)}
         onKeyDown={(e) => {
@@ -87,10 +89,12 @@ function MeterChip({ projectId, onOpen }: { projectId: string; onOpen: () => voi
 
 export default function TopBar({ projectId }: { projectId: string }) {
   const t = useTranslations("topbar");
+  const ts = useTranslations("shortcuts");
   const view = useUiStore((s) => s.view);
   const setView = useUiStore((s) => s.setView);
   const theme = useUiStore((s) => s.theme);
   const setTheme = useUiStore((s) => s.setTheme);
+  const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
   const setImportOpen = useUiStore((s) => s.setImportOpen);
   const setTpyOpen = useUiStore((s) => s.setTpyOpen);
   const setRetentionOpen = useUiStore((s) => s.setRetentionOpen);
@@ -142,6 +146,16 @@ export default function TopBar({ projectId }: { projectId: string }) {
         <button
           type="button"
           className="ez-icon-btn"
+          onClick={() => setPaletteOpen(true)}
+          aria-label={ts("palette")}
+          title={`${ts("palette")} (Ctrl/⌘ K)`}
+          data-tour="palette-button"
+        >
+          <span className="ez-kbd" aria-hidden="true">⌘K</span>
+        </button>
+        <button
+          type="button"
+          className="ez-icon-btn"
           onClick={() => setTheme(theme === "light" ? "dark" : "light")}
           aria-label={t("themeToggle")}
           title={t("themeToggle")}
@@ -185,6 +199,8 @@ export default function TopBar({ projectId }: { projectId: string }) {
             >
               {t("exportJsonLd")}
             </MenuItem>
+            <MenuSeparator />
+            <MenuItem onSelect={() => startTour()}>{ts("takeTour")}</MenuItem>
           </Menu>
         ) : null}
       </div>

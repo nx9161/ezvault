@@ -102,3 +102,51 @@ localStorage, 8 max). mod+k now opens the palette (registry entry
 `palette`, `shortcuts.palette` = "Command palette"); the `#ez-global-search`
 input keeps working standalone as the fallback anchor. New `palette.*`
 i18n keys (title/placeholder/actions/recent/searchResults/noResults).
+
+---
+
+## 3. driver.js@1.9.0 — onboarding tour (Wave 1, LAST)
+
+**Status:** ACCEPTED · landed 2026-10-15 · commit `TBD`
+
+**What it is:** framework-agnostic product-tour library (Kamran Ahmed) —
+highlight + popover steps over DOM anchors.
+
+**Verification (re-pulled 2026-10-15):**
+
+- **Stars:** 26,909 (github.com/kamranahmedse/driver.js, pushed 2026-10-13) —
+  via GitHub API
+- **Version:** 1.9.0 published 2026-10-03 (npm registry)
+- **License (exact, read from `node_modules/driver.js/license`):**
+  `The MIT License — Copyright (c) Kamran Ahmed`
+- **License gate:** `node scripts/check-licences.mjs` PASS — no GPL/AGPL/SSPL;
+  only the four pre-existing LGPL warnings (unchanged from baseline)
+- **OSV.dev:** `driver.js@1.9.0` → **zero** vulnerabilities
+- **postinstall scripts:** none · **dependencies:** zero
+- **Telemetry/phone-home:** none — zero `fetch(`/`XMLHttpRequest`/`sendBeacon`
+  in the shipped `dist/driver.js.cjs`
+- **Install:** `npm install --save-exact driver.js@1.9.0`
+
+**Bundle delta (measured):** `/[projectId]/page` First Load JS
+**206.31 → 207.06 KB gzip (+0.75 KB)** — the 7.3 KB driver.js loads
+dynamically only when a tour starts (`await import("driver.js")`); the
+0.9 KB `driver.css` is a static import in the tiny shell-mounted
+`TourLauncher` (negligible, keeps the popover styled). Far under the 40
+KB/route rule. No ADR needed.
+
+**Gap closed:** `lib/tour/launcher.ts` (framework-free `startTour()` →
+`ezvault:start-tour` window event) + `lib/tour/steps.ts` (8 steps from
+`buildSteps`, copy under `tour.*` i18n keys, plain words) +
+`components/tour/TourLauncher.tsx` (shell-mounted listener; steps whose
+anchor is absent — mobile layouts, empty viewer, unopened dialogs — are
+filtered out, never broken). Stable `data-tour` anchors: sidebar lists /
+tags, item grid, viewer toolbar, palette button, global search, plus the
+dialog/wizard step containers (`tpy-upload/analyze/map/run/report`,
+`import-tabs/review`) for future steps. Entry points: new TopBar palette
+button (⌘K chip, `data-tour="palette-button"`), "Take the tour" in the
+project menu, "Take the tour" in Settings (new `settings.help` section),
+a quiet link in the empty-library state, and a palette action (registry
+entry `takeTour`, `shortcuts.takeTour`, palette-only — no key binding, hint
+shows ⌘K per the overlay convention). Deliberate choice: **no auto-start**
+— the tour runs only from explicit entry points; `ezvault:tour:v1` is set
+in localStorage when a run completes.
