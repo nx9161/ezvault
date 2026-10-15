@@ -4,7 +4,7 @@
 
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useUiStore } from "@/lib/store/ui";
 import { useLists, useTags, useSearch, useTrash } from "@/lib/api/hooks";
@@ -63,6 +63,32 @@ function findNode(nodes: ListNode[], id: string): ListNode | null {
     if (hit) return hit;
   }
   return null;
+}
+
+/** id -> parent id (null for roots); used by treeview ArrowLeft. */
+function parentMapOf(tree: ListNode[]): Map<string, string | null> {
+  const m = new Map<string, string | null>();
+  const walk = (nodes: ListNode[], parent: string | null) => {
+    for (const n of nodes) {
+      m.set(n.id, parent);
+      if (n.children) walk(n.children, n.id);
+    }
+  };
+  walk(tree, null);
+  return m;
+}
+
+/** Flattened ids in the order a keyboard user sees them (collapsed subtrees skipped). */
+function visibleOrderIds(tree: ListNode[], collapsed: Set<string>): string[] {
+  const out: string[] = [];
+  const walk = (nodes: ListNode[]) => {
+    for (const n of nodes) {
+      out.push(n.id);
+      if (n.children && !collapsed.has(n.id)) walk(n.children);
+    }
+  };
+  walk(tree);
+  return out;
 }
 
 function useOpContext(projectId: string): OpContext {
@@ -130,9 +156,32 @@ interface TreeRowProps {
   collapsed: Set<string>;
   toggleCollapse: (id: string) => void;
   onRename: (node: ListNode) => void;
+  focusId: string | null;
+  firstVisibleId: string | null;
+  visibleOrder: string[];
+  parentMap: Map<string, string | null>;
+  onFocusRow: (id: string) => void;
+  focusRowById: (id: string) => void;
+  registerRow: (id: string, el: HTMLLIElement | null) => void;
 }
 
-function TreeRow({ node, depth, projectId, tree, ctx, collapsed, toggleCollapse, onRename }: TreeRowProps) {
+function TreeRow({
+  node,
+  depth,
+  projectId,
+  tree,
+  ctx,
+  collapsed,
+  toggleCollapse,
+  onRename,
+  focusId,
+  firstVisibleId,
+  visibleOrder,
+  parentMap,
+  onFocusRow,
+  focusRowById,
+  registerRow,
+}: TreeRowProps) {
   const t = useTranslations("sidebar");
   const tc = useTranslations("app");
   const activeListId = useUiStore((s) => s.activeListId);
@@ -178,13 +227,72 @@ function TreeRow({ node, depth, projectId, tree, ctx, collapsed, toggleCollapse,
     }
   }
 
+  function onRowKeyDown(e: React.KeyboardEvent) {
+    // Treeview pattern: arrows move focus, Enter activates, F2/Delete act.
+    const idx = visibleOrder.indexOf(node.id);
+    const move = (nextId: string) => {
+      e.preventDefault();
+      focusRowById(nextId);
+    };
+    if (e.key === "F2") {
+      e.preventDefault();
+      onRename(node);
+      return;
+    }
+    if (e.key === "Delete") {
+      e.preventDefault();
+      setConfirmDelete(true);
+      return;
+    }
+    if (e.key === "Enter") {
+      setActiveListId(node.id);
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      if (idx >= 0 && idx < visibleOrder.length - 1) move(visibleOrder[idx + 1]);
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      if (idx > 0) move(visibleOrder[idx - 1]);
+      return;
+    }
+    if (e.key === "ArrowRight") {
+      // Nested rows bubble here, so stop the ancestor from double-handling.
+      e.preventDefault();
+      e.stopPropagation();
+      if (hasChildren && isCollapsed) toggleCollapse(node.id);
+      else if (hasChildren && node.children!.length > 0) move(node.children![0].id);
+      return;
+    }
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (hasChildren && !isCollapsed) toggleCollapse(node.id);
+      else {
+        const parent = parentMap.get(node.id);
+        if (parent) move(parent);
+      }
+    }
+  }
+
   return (
-    <li>
+    <li
+      ref={(el) => registerRow(node.id, el)}
+      role="treeitem"
+      aria-expanded={hasChildren ? !isCollapsed : undefined}
+      aria-selected={activeListId === node.id}
+      aria-level={depth + 1}
+      tabIndex={node.id === (focusId ?? firstVisibleId) ? 0 : -1}
+      onFocus={() => onFocusRow(node.id)}
+      onClick={() => setActiveListId(node.id)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenuAt({ x: e.clientX, y: e.clientY });
+      }}
+      onKeyDown={onRowKeyDown}
+    >
       <div
         className="ez-tree-row"
-        role="treeitem"
-        aria-expanded={hasChildren ? !isCollapsed : undefined}
-        aria-current={activeListId === node.id}
         data-drop-target={dropTarget || undefined}
         data-shake={shake || undefined}
         draggable
@@ -203,30 +311,11 @@ function TreeRow({ node, depth, projectId, tree, ctx, collapsed, toggleCollapse,
         }}
         onDragLeave={() => setDropTarget(false)}
         onDrop={handleDrop}
-        onClick={() => setActiveListId(node.id)}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          setMenuAt({ x: e.clientX, y: e.clientY });
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "F2") {
-            e.preventDefault();
-            onRename(node);
-          } else if (e.key === "Delete") {
-            e.preventDefault();
-            setConfirmDelete(true);
-          } else if (e.key === "Enter") {
-            setActiveListId(node.id);
-          }
-        }}
-        tabIndex={0}
         title={node.name}
       >
         {hasChildren ? (
           <span
             className="ez-tree-toggle"
-            role="button"
-            tabIndex={-1}
             aria-hidden="true"
             onClick={(e) => {
               e.stopPropagation();
@@ -324,6 +413,13 @@ function TreeRow({ node, depth, projectId, tree, ctx, collapsed, toggleCollapse,
               collapsed={collapsed}
               toggleCollapse={toggleCollapse}
               onRename={onRename}
+              focusId={focusId}
+              firstVisibleId={firstVisibleId}
+              visibleOrder={visibleOrder}
+              parentMap={parentMap}
+              onFocusRow={onFocusRow}
+              focusRowById={focusRowById}
+              registerRow={registerRow}
             />
           ))}
         </ul>
@@ -350,6 +446,21 @@ function ListsSection({ projectId }: { projectId: string }) {
 
   const tree = useMemo(() => buildTree(data ?? []), [data]);
   const badges = searchData?.badges;
+
+  // D-M3: roving tabindex registry for the treeview pattern.
+  const [focusId, setFocusId] = useState<string | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLLIElement>());
+  const registerRow = useCallback((id: string, el: HTMLLIElement | null) => {
+    if (el) rowRefs.current.set(id, el);
+    else rowRefs.current.delete(id);
+  }, []);
+  const focusRowById = useCallback((id: string) => {
+    setFocusId(id);
+    requestAnimationFrame(() => rowRefs.current.get(id)?.focus());
+  }, []);
+  const visibleOrder = useMemo(() => visibleOrderIds(tree, collapsed), [tree, collapsed]);
+  const parentMap = useMemo(() => parentMapOf(tree), [tree]);
+  const firstVisibleId = visibleOrder[0] ?? null;
 
   function toggleCollapse(id: string) {
     setCollapsed((prev) => {
@@ -412,6 +523,13 @@ function ListsSection({ projectId }: { projectId: string }) {
               collapsed={collapsed}
               toggleCollapse={toggleCollapse}
               onRename={beginRename}
+              focusId={focusId}
+              firstVisibleId={firstVisibleId}
+              visibleOrder={visibleOrder}
+              parentMap={parentMap}
+              onFocusRow={setFocusId}
+              focusRowById={focusRowById}
+              registerRow={registerRow}
             />
           ))}
         </ul>
