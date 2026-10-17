@@ -153,3 +153,7 @@ bucket directly), but it needs the GitHub secrets `DATABASE_URL`,
 ## License
 
 MIT — see [LICENSE](LICENSE). Third-party notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+---
+
+Built by **Naman Parmar** ([nx9161](https://github.com/nx9161)).
