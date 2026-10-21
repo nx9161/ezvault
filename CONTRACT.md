@@ -302,3 +302,77 @@ Types: `StorageCompressRequest`, `StorageCompressResponse`,
   geometry (words from later pages are kept in reading order but share
   page 1's coordinate space); copy-to-project still does not copy
   transcriptions (unchanged from Wave B2).
+
+## Wave D — Integrations + Developer API (rows 25/26/36)
+
+- Schema (migration `0011_wave_d.sql`): `omeka_settings` (per project;
+  `credential_cipher` is the ONLY credential column — AES-256-GCM
+  ciphertext, `v1:<iv>:<tag>:<ct>` base64, key derived from MASTER_KEY
+  via scrypt in `lib/crypto/master-key.ts`), `omeka_sync` (item →
+  remote id/url, `media_map` photo→media, last status/error),
+  `api_tokens` (name, `token_hash` SHA-256 UNIQUE, display `prefix`,
+  `scopes` JSONB, created/last-used/expires/revoked); `import_jobs`
+  kinds gain `'omeka'` + `'iiif'`.
+- Omeka S push (row 25): client `lib/omeka/client.ts` (public Omeka S
+  REST spec; key auth as `key_identity`/`key_credential` query params;
+  property ids resolved via GET /api/properties). Mapping is by
+  property URI: `dc/terms/*` and `dc/elements/1.1/*` → `dcterms:<local>`
+  literal values; non-DC properties and terms missing on the target
+  site are returned as `warnings`, never faked. Item notes append as
+  extra `dcterms:description` values. Photos attach once via the `url`
+  ingester from a 1-hour presigned GET (`media_map` tracks attachments).
+  Sync state makes re-push a PUT update, never a duplicate. Routes:
+  `GET|PUT /api/projects/[id]/omeka/settings` (view NEVER carries the
+  credential; a credential save without MASTER_KEY fails
+  `400 not_configured` and stores nothing), `POST .../omeka/push`
+  `{item_id}`, `POST .../omeka/push-project` (job kind `omeka`,
+  per-item results in `report`; Omeka errors surface with their status
+  + body excerpt as `omeka_error`). UI: Project settings Omeka section
+  (save + push whole project), Inspector "Omeka" button (push item).
+  NO live Omeka instance exists — unit tests mock fetch; live
+  verification is owner-side against a real Omeka S site.
+- IIIF import (row 26): `POST /api/projects/[id]/import/iiif`
+  `{manifest_url, template_id?}` → `{job_id, list_id, manifest_label,
+  version, imported, failed, results[]}` (201). Parser
+  `lib/iiif/manifest.ts` (Presentation v2 sequences/canvases + v3
+  items; first painting image per canvas; Image API service ids
+  normalized to `{service}/full/max/0/default.jpg`). Choice
+  (documented): ONE ITEM PER CANVAS, grouped in a list named from the
+  manifest label. All fetches go through `lib/fetch-guard.ts` (https
+  only; private/loopback/link-local/CGNAT/reserved IP literals +
+  local hostnames rejected; redirects re-validated per hop; byte
+  caps). NOTE: the brief named `lib/link-policy.ts` as the existing
+  SSRF policy — that module is the note-LINK allowlist, not an SSRF
+  control, so the fetch guard is a new module built to the brief's
+  rule and is the single reuse point for user-URL fetches. Known
+  limit: hostnames are not DNS-resolved, so DNS-rebinding names are
+  out of scope for this layer. Images harvest through the standard
+  pipeline server-side: magic-byte verify → staged object
+  (`keys.upload`) → `createPhotoRows` → `processPhoto`. Metadata:
+  manifest pairs map onto the template by URI/label/local-name;
+  canvas label fills `title`, manifest description fills
+  `description`; unmapped pairs are preserved verbatim in an item
+  note (jsonld-accept convention). UI: ImportDialog "IIIF" tab (URL
+  paste; synchronous result line + toasts).
+- Developer API (row 36): tokens `lib/token-core.ts` (pure:
+  `ezv_` + 32 random bytes; SHA-256 hash at rest; display prefix;
+  constant-time digest compare mirroring `lib/auth.ts`) +
+  `lib/token-auth.ts` (`enforceTokenScope(req, scope)`: no bearer =
+  human path no-op; presented bearer must be a live token with the
+  exact scope — revoked/expired 401, under-scoped 403, `last_used_at`
+  stamped). Scopes: `read`, `notes:write` (neither implies the other).
+  Documented subset (DEVELOPER-API.md): GET projects / project /
+  items / item / item photos / photo / photo notes / selection notes /
+  note; POST photo + selection notes; PATCH note. Note DELETE denies
+  presented tokens (delete is outside the scopes); token management
+  (`GET|POST /api/api-tokens`, `DELETE /api/api-tokens/[tokenId]`) is
+  human-only and returns the plaintext secret exactly once (201).
+  Platform note (binding, also in DEVELOPER-API.md): Vercel
+  Authentication still fronts the public deployment — scripts also
+  send the protection-bypass header or target a local/self-hosted
+  run; Deployment Protection is never disabled.
+- Bundle: workspace First Load JS **213.67 → 215.03 KB gzip (+1.36 KB)**
+  (canonical method, INTEGRATION-DECISIONS.md — 11 files, 0 missing):
+  the IIIF tab, Omeka settings/push + token settings UI, and the
+  Inspector push button only; all Wave D logic is server-side. No ADR
+  needed. Zero new dependencies this wave.
