@@ -414,3 +414,73 @@ reaches a client bundle.
 **Bundle delta:** **0 KB** client — server-only import chain. No ADR
 needed. (Wave B2's client-side delta is measured separately in
 CONTRACT.md.)
+
+---
+
+## 9. tesseract.js@7.0.0 + tesseract.js-core@7.0.0 — client-side OCR (Wave C, row 14)
+
+**Status:** ACCEPTED · landed 2026-10-21
+
+**Why:** row 14 needs ONE real OCR engine behind the pluggable adapter
+(`lib/ocr/adapter.ts`). Tesseract.js (the WASM port of Tesseract OCR)
+runs entirely CLIENT-side in a Web Worker: server CPU stays at zero
+($0 forever), and the photo never leaves the device to be read. The
+adapter contract is engine-agnostic; tesseract registers against it in
+`lib/ocr/tesseract-engine.ts`, reached ONLY via dynamic `import()` from
+the transcription panel's Run OCR handler.
+
+**Verification (pulled 2026-10-21):**
+
+- **Stars:** tesseract.js 38,778 (github.com/naptha/tesseract.js, pushed
+  2026-05-17, not archived) · tesseract.js-core 194 (same org)
+- **Versions:** both 7.0.0 (npm registry `latest` at install time;
+  installed `--save-exact`)
+- **Licenses (exact, read from the installed packages):**
+  tesseract.js — `Apache License, Version 2.0, January 2004` (shipped
+  `LICENSE.md`) · tesseract.js-core — `Apache License, Version 2.0`
+  (shipped `LICENSE`; upstream Tesseract C++ is Apache-2.0) ·
+  traineddata — `eng` model from tesseract-ocr/tessdata_fast
+  (Apache-2.0 per the repo's license; raw model sha256
+  `7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2`)
+- **License gate:** `node scripts/check-licences.mjs` PASS after
+  install — no GPL/AGPL/SSPL; only the four pre-existing LGPL warnings
+  (unchanged). Transitive deps are MIT / Apache-2.0 / BSD-2-Clause
+  (bmp-js, idb-keyval, wasm-feature-detect, zlibjs, regenerator-runtime,
+  node-fetch tree).
+- **OSV.dev:** `tesseract.js@7.0.0` → **zero** vulnerabilities (`{}`)
+- **postinstall scripts:** tesseract.js declares
+  `opencollective-postinstall || true` — the standard OpenCollective
+  funding banner (prints a message, always exits 0, no network, no
+  code execution beyond the banner). All other packages in the tree:
+  none. Documented here because the bar asks; accepted as benign.
+- **Telemetry/phone-home:** the engine code itself makes no calls; all
+  runtime fetches are the self-hosted assets below (same origin).
+- **Install:** `npm install --save-exact tesseract.js@7.0.0`
+
+**Asset strategy — SELF-HOSTED under `public/ocr/` (decision + why):**
+the app CSP is `script-src 'self'` and `connect-src 'self'` (+R2), so
+the commonly used pinned-CDN layout (jsdelivr worker/core/lang) would
+be blocked outright, and a blob: worker would need `worker-src blob:`.
+Self-hosting keeps OCR working under the strict CSP with zero policy
+changes. The files are byte-copies of the pinned npm packages' dist
+artifacts — NOT vendored source: `scripts/sync-ocr-assets.mjs`
+regenerates them from `node_modules` (+ the pinned tessdata_fast eng
+model, gzipped at level 9) after any version bump. Only the LSTM cores
+are shipped (the engine runs OEM 1 = LSTM only). Sizes:
+`worker.min.js` 111,307 B · core JS 3 × ~89 KB · core WASM
+2,855,361 / 2,857,601 / 2,862,266 B (plain / SIMD / relaxed-SIMD) ·
+`lang/eng.traineddata.gz` 1,962,155 B — **10,999,072 B total (~10.5
+MiB)**, served as static files, cached by the browser, fetched ONLY
+when OCR runs. Bundled languages: **eng only** — the panel's language
+picker defaults to eng; other codes fail honestly with "language data
+not installed" rather than silently fetching a CDN.
+
+**Bundle delta:** **0 KB First Load** by construction (dynamic import
+edge only; the tesseract.js API chunk loads on first Run OCR click)
+— verified on the Wave C build (see CONTRACT.md Wave C). No ADR needed.
+
+**Gap closed:** rows 13/14/19-remainder. Adapter mapping is unit-tested
+with a stub engine + both tesseract output shapes, and a REAL smoke
+test OCRs a rendered "HELLO VAULT" image through the self-hosted
+core/lang assets in ~1.2 s (`test/transcriptions.test.mjs`). Failed
+OCR throws and creates NO transcription — never a fake empty result.
