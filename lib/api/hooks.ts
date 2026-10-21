@@ -220,7 +220,16 @@ export function useTags(projectId: string | null) {
 export function useLists(projectId: string | null) {
   return useSWR<ListNode[]>(
     projectId ? key.lists(projectId) : null,
-    fetcher,
+    // The lists route answers an envelope ({ lists: [...] }, pre-nested
+    // roots) — this hook was the one consumer-facing hook still using
+    // the raw fetcher, so `data` was the envelope object and Sidebar's
+    // buildTree(data) threw "lists is not iterable" the moment the
+    // fetch landed (masked until the command-bus loop was fixed, as
+    // that crash fired first). Unwrap here, per the header convention.
+    async (url: string) => {
+      const raw = await get<{ lists?: ListNode[] } | ListNode[]>(url);
+      return Array.isArray(raw) ? raw : (raw.lists ?? []);
+    },
     swrDefaults,
   );
 }
