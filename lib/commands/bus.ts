@@ -31,8 +31,14 @@ class CommandBus {
   private redoStack: Command[] = [];
   private listeners = new Set<Listener>();
   private running = false;
+  // useSyncExternalStore contract: getSnapshot MUST return a referentially
+  // stable value between changes, or React re-renders forever ("Maximum
+  // update depth exceeded", React #185 — the workspace crash). The snapshot
+  // is therefore cached and only recomputed inside emit(), the single
+  // funnel every stack mutation goes through.
+  private cachedSnapshot: CommandBusState = this.computeSnapshot();
 
-  snapshot(): CommandBusState {
+  private computeSnapshot(): CommandBusState {
     return {
       undoDepth: this.undoStack.length,
       redoDepth: this.redoStack.length,
@@ -41,16 +47,24 @@ class CommandBus {
     };
   }
 
+  snapshot(): CommandBusState {
+    return this.cachedSnapshot;
+  }
+
   subscribe(fn: Listener): () => void {
+    // Standard external-store subscribe: register only. Invoking fn here
+    // would call React's forceStoreRerender from inside the passive-effect
+    // commit (the other half of the #185 loop); React reads getSnapshot
+    // itself right after subscribing.
     this.listeners.add(fn);
-    fn(this.snapshot());
     return () => {
       this.listeners.delete(fn);
     };
   }
 
   private emit() {
-    const s = this.snapshot();
+    this.cachedSnapshot = this.computeSnapshot();
+    const s = this.cachedSnapshot;
     for (const fn of this.listeners) fn(s);
   }
 
