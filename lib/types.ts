@@ -300,6 +300,88 @@ export interface UpdateNoteRequest {
 }
 
 // ---------------------------------------------------------------------------
+// Transcriptions (§2.4a — Wave C, rows 13/14)
+// ---------------------------------------------------------------------------
+
+/** One word's bounding box in PAGE coordinates (see Transcription.page_*). */
+export interface TranscriptionWord {
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** 0..1 confidence (ALTO WC / OCR), when the source provides it. */
+  confidence?: number;
+}
+
+/**
+ * A transcription hangs off an IMAGE (transcriptions.image_id), not a
+ * subject: the wire shape resolves the owning photo subject for the
+ * client's convenience. Word boxes live in dedicated columns (migration
+ * 0010), NOT in config — config is provenance only:
+ *   manual: { source: 'manual' }
+ *   ALTO:   { source: 'alto', alto: { namespace, version } }
+ *   OCR:    { source: 'ocr', engine: 'tesseract', version, lang }
+ */
+export interface Transcription {
+  id: UUID;
+  /** Owning photo subject id (resolved from image_id). */
+  photo_id: UUID;
+  image_id: UUID;
+  project_id: UUID;
+  text: string;
+  /** R2 key of the stored ALTO XML (keys.transcription), or null. */
+  alto_r2_key: string | null;
+  config: Record<string, unknown>;
+  status: string;
+  /**
+   * Orientation of the WORD-BOX space relative to the stored image:
+   * 0/false = boxes are in stored-image coordinates (the normal ALTO /
+   * OCR case). A producer that recognized a rotated/flipped rendering
+   * records that orientation here; the viewer inverts it when placing
+   * boxes. NOT a snapshot of the photo's display edits.
+   */
+  angle: number;
+  mirror: boolean;
+  words: TranscriptionWord[];
+  /** Coordinate space of `words` (ALTO page size, or photo pixels for OCR). */
+  page_width: number | null;
+  page_height: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateTranscriptionRequest {
+  text: string;
+  config?: Record<string, unknown>;
+  status?: string;
+  angle?: number;
+  mirror?: boolean;
+  words?: TranscriptionWord[];
+  page_width?: number | null;
+  page_height?: number | null;
+  clientOpId?: UUID;
+}
+
+export interface UpdateTranscriptionRequest {
+  text?: string;
+  config?: Record<string, unknown>;
+  status?: string;
+  angle?: number;
+  mirror?: boolean;
+  words?: TranscriptionWord[];
+  page_width?: number | null;
+  page_height?: number | null;
+  clientOpId?: UUID;
+}
+
+export interface ImportAltoRequest {
+  /** Full ALTO XML document as a string (≤ ~4 MB; B11 body caps apply). */
+  xml: string;
+  clientOpId?: UUID;
+}
+
+// ---------------------------------------------------------------------------
 // Templates & vocabularies (§2.5)
 // ---------------------------------------------------------------------------
 
@@ -458,7 +540,7 @@ export interface UpdateListRequest {
 // Search (§2.9)
 // ---------------------------------------------------------------------------
 
-export type SearchScope = 'all' | 'metadata' | 'notes' | 'tags';
+export type SearchScope = 'all' | 'metadata' | 'notes' | 'tags' | 'transcriptions';
 
 export interface SearchHit {
   subject_id: UUID;

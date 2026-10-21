@@ -16,21 +16,23 @@ type Ctx = { params: Promise<{ id: string }> };
  * search_documents_gin_all for the scope=all concatenation).
  */
 const VEC_EXPRS: Record<SearchScope, string> = {
-  all: `(sd.doc_meta || sd.doc_notes || sd.doc_tags)`,
+  all: `(sd.doc_meta || sd.doc_notes || sd.doc_tags || sd.doc_transcriptions)`,
   metadata: `sd.doc_meta`,
   notes: `sd.doc_notes`,
   tags: `sd.doc_tags`,
+  transcriptions: `sd.doc_transcriptions`,
 };
 
 function parseScope(raw: string | null): SearchScope {
-  return raw === 'metadata' || raw === 'notes' || raw === 'tags' ? raw : 'all';
+  return raw === 'metadata' || raw === 'notes' || raw === 'tags' || raw === 'transcriptions' ? raw : 'all';
 }
 
 /**
  * GET /api/projects/[id]/search?q=&scope=
- * FTS over metadata+notes+tags, read from the trigger-maintained
- * search_documents table (A1): per-scope tsvector columns (doc_meta,
- * doc_notes, doc_tags) + doctext for ts_headline. Scope selects which
+ * FTS over metadata+notes+tags+transcriptions, read from the
+ * trigger-maintained search_documents table (A1 + migration 0010):
+ * per-scope tsvector columns (doc_meta, doc_notes, doc_tags,
+ * doc_transcriptions) + doctext for ts_headline. Scope selects which
  * precomputed vector participates — no per-request aggregation, no
  * per-row to_tsvector.
  * `websearch_to_tsquery` english+simple, AND default, "phrase" supported,
