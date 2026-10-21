@@ -689,3 +689,10 @@ details.ez-collapsible > summary { padding: 8px 12px; cursor: pointer; font-size
   body[data-print="items"] .ez-inspector { display: none !important; }
 }
 
+
+/* Wave C (row 13): selectable transcription text layer over the photo.
+   Spans carry the transcribed words in transparent text — invisible
+   until selected, positioned at the ALTO/OCR word boxes. */
+.ez-text-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.ez-text-layer span { position: absolute; color: transparent; white-space: pre; line-height: 1; cursor: text; user-select: text; overflow: hidden; }
+.ez-text-layer span::selection { background: rgba(224, 138, 60, .45); color: transparent; }

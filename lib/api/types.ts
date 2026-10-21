@@ -30,6 +30,8 @@ export type {
   SearchHit,
   TrashEntry,
   Note,
+  Transcription,
+  TranscriptionWord,
   DuplicatePolicy,
   NotesExportFormat,
   JobStatus,

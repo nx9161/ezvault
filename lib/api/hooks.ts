@@ -34,6 +34,7 @@ import {
   type Selection,
   type UiTemplate,
   type NoteDoc,
+  type Transcription,
 } from "./types";
 
 const fetcher = <T,>(url: string) => get<T>(url);
@@ -60,6 +61,8 @@ export const key = {
     `/api/projects/${id}/photos/${photoId}/selections`,
   photoNotes: (id: string, photoId: string) =>
     `/api/projects/${id}/photos/${photoId}/notes`,
+  transcriptions: (id: string, photoId: string) =>
+    `/api/projects/${id}/photos/${photoId}/transcriptions`,
   selectionNotes: (id: string, selId: string) =>
     `/api/projects/${id}/selections/${selId}/notes`,
   metadata: (id: string, subjectId: string) =>
@@ -303,4 +306,13 @@ export function thumbUrl(projectId: string, photoId: string) {
 }
 export function originalUrl(projectId: string, photoId: string) {
   return buildOriginalUrl(projectId, photoId);
+}
+
+/** Wave C (row 13): transcriptions for a photo (wire shape is the view model). */
+export function useTranscriptions(projectId: string | null, photoId: string | null) {
+  return useSWR<{ items: Transcription[]; total: number }>(
+    projectId && photoId ? key.transcriptions(projectId, photoId) : null,
+    fetcher,
+    swrDefaults,
+  );
 }

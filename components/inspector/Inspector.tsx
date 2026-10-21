@@ -21,6 +21,7 @@ import PhotoViewer from "./PhotoViewer";
 import MetadataForm from "./MetadataForm";
 import NotesPanel from "./NotesPanel";
 import SelectionsPanel from "./SelectionsPanel";
+import TranscriptionPanel from "./TranscriptionPanel";
 import type { InspectorTab } from "@/lib/store/ui";
 
 const TABS: InspectorTab[] = ["viewer", "metadata", "notes", "selections"];
@@ -253,6 +254,7 @@ function SingleItemInspector({ projectId, itemId }: { projectId: string; itemId:
               onSelectionsChanged={() => mutateSelections()}
               ctx={ctx}
             />
+            <TranscriptionPanel projectId={projectId} photo={photo} />
             <PhotoStrip projectId={projectId} itemId={itemId} />
             {/* SHOULD-22: selection tab strip — one tab per selection with
                 its note-count badge, so a selection is one click away.

@@ -869,6 +869,7 @@ function SearchResults({ projectId }: { projectId: string }) {
             <option value="metadata">{t("scopeMetadata")}</option>
             <option value="notes">{t("scopeNotes")}</option>
             <option value="tags">{t("scopeTags")}</option>
+            <option value="transcriptions">{t("scopeTranscriptions")}</option>
           </select>
         </label>
         <button type="button" className="ez-btn ez-btn--sm" onClick={clearSearch}>

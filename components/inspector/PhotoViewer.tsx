@@ -14,7 +14,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { thumbUrl } from "@/lib/api/hooks";
+import { thumbUrl, useTranscriptions } from "@/lib/api/hooks";
 import { post, patch } from "@/lib/api/client";
 import { mutate } from "swr";
 import { useUiStore } from "@/lib/store/ui";
@@ -451,6 +451,54 @@ export default function PhotoViewer({
     setLbIndex(null);
   }
 
+  // Wave C (row 13): selectable text layer. The most recent transcription
+  // WITH word boxes renders as transparent spans over the photo (the
+  // Tropy behavior); without boxes there is no overlay and the panel's
+  // text is the selectable surface.
+  const { data: trData } = useTranscriptions(projectId, photo.id);
+  const textTr = [...(trData?.items ?? [])].reverse().find((tr) => tr.words.length > 0) ?? null;
+
+  /** Word rect (page space) -> screen rect, or null when degenerate. */
+  function wordScreenRect(w: { x: number; y: number; w: number; h: number }): {
+    x: number; y: number; w: number; h: number;
+  } | null {
+    if (!textTr) return null;
+    const pageW = textTr.page_width || photo.width;
+    const pageH = textTr.page_height || photo.height;
+    const sx = photo.width / pageW;
+    const sy = photo.height / pageH;
+    let pts: Array<[number, number]> = [
+      [w.x * sx, w.y * sy],
+      [(w.x + w.w) * sx, w.y * sy],
+      [w.x * sx, (w.y + w.h) * sy],
+      [(w.x + w.w) * sx, (w.y + w.h) * sy],
+    ];
+    // Transcription angle/mirror describe the box space relative to the
+    // stored image (CONTRACT.md Wave C): invert them (mirror is its own
+    // inverse; rotate by -angle around the image center) to land in
+    // stored-image coordinates, then the display transform takes over.
+    if (textTr.mirror || textTr.angle % 360 !== 0) {
+      const rad = (-textTr.angle * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      pts = pts.map(([x, y]) => {
+        let cx = x - photo.width / 2;
+        const cy = y - photo.height / 2;
+        if (textTr.mirror) cx = -cx;
+        return [cx * cos - cy * sin + photo.width / 2, cx * sin + cy * cos + photo.height / 2];
+      });
+    }
+    const screen = pts.map(([x, y]) => photoToScreen(x, y));
+    const xs = screen.map((p) => p[0]);
+    const ys = screen.map((p) => p[1]);
+    const x = Math.min(...xs);
+    const y = Math.min(...ys);
+    const rw = Math.max(...xs) - x;
+    const rh = Math.max(...ys) - y;
+    if (!(rw > 0) || !(rh > 0)) return null;
+    return { x, y, w: rw, h: rh };
+  }
+
   const ariaLabel = t("ariaLabel", {
     filename: photo.filename,
     width: photo.width,
@@ -529,6 +577,29 @@ export default function PhotoViewer({
               onPointerMove={onOverlayPointerMove}
               onPointerUp={onOverlayPointerUp}
             />
+            {textTr ? (
+              <div className="ez-text-layer" role="document" aria-label="transcription text layer">
+                {textTr.words.map((w, i) => {
+                  const r = wordScreenRect(w);
+                  if (!r) return null;
+                  return (
+                    <span
+                      key={i}
+                      style={{
+                        left: r.x,
+                        top: r.y,
+                        width: r.w,
+                        height: r.h,
+                        fontSize: Math.max(6, r.h * 0.85),
+                        pointerEvents: drawing ? "none" : "auto",
+                      }}
+                    >
+                      {w.text}
+                    </span>
+                  );
+                })}
+              </div>
+            ) : null}
           </>
         )}
       </div>
