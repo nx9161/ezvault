@@ -20,7 +20,11 @@ REST surface plus an app-level bearer-token layer documented here.
    layer: it is checked on every documented route, it can never widen
    access beyond its scopes, and revoked/expired tokens get `401`.
    Requests with no bearer header ride the human (browser session)
-   path, exactly as the UI does.
+   path, exactly as the UI does. Denial outside the subset is enforced
+   globally, not per route: a request presenting a token to ANY other
+   route (or an undocumented method on a documented path, e.g.
+   `DELETE /api/projects/<id>`) is rejected `403` before the handler
+   runs.
 
 ## Tokens
 

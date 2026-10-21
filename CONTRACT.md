@@ -321,19 +321,36 @@ Types: `StorageCompressRequest`, `StorageCompressResponse`,
   site are returned as `warnings`, never faked. Item notes append as
   extra `dcterms:description` values. Photos attach once via the `url`
   ingester from a 1-hour presigned GET (`media_map` tracks attachments).
-  Sync state makes re-push a PUT update, never a duplicate. Routes:
+  Sync state makes re-push a PUT update, never a duplicate: the
+  `omeka_sync` row is persisted IMMEDIATELY after a successful
+  create/update, before media attach, and a media-attach failure lands
+  as `last_status='warning'` + `last_error` on that row (and in the
+  push warnings) so a re-push retries the unattached photos on the
+  update path. Client fetch hygiene: the base URL must be https (the
+  key credential travels in the query string; `http://` is allowed
+  ONLY for loopback hosts, e.g. a local dev instance, and is refused
+  at settings-save otherwise); every request has a 30s
+  AbortController timeout and responses are read through the
+  fetch-guard's streaming byte cap (10 MiB). Routes:
   `GET|PUT /api/projects/[id]/omeka/settings` (view NEVER carries the
   credential; a credential save without MASTER_KEY fails
   `400 not_configured` and stores nothing), `POST .../omeka/push`
-  `{item_id}`, `POST .../omeka/push-project` (job kind `omeka`,
-  per-item results in `report`; Omeka errors surface with their status
-  + body excerpt as `omeka_error`). UI: Project settings Omeka section
+  `{item_id}` (Omeka errors surface as `omeka_error` with their
+  status + body excerpt), `POST .../omeka/push-project` (job kind
+  `omeka`; per-item results in `report` carry the same status +
+  excerpt as message text). UI: Project settings Omeka section
   (save + push whole project), Inspector "Omeka" button (push item).
   NO live Omeka instance exists — unit tests mock fetch; live
   verification is owner-side against a real Omeka S site.
 - IIIF import (row 26): `POST /api/projects/[id]/import/iiif`
   `{manifest_url, template_id?}` → `{job_id, list_id, manifest_label,
-  version, imported, failed, results[]}` (201). Parser
+  version, imported, skipped, failed, results[]}` (201). Count
+  semantics: `imported` counts canvases whose photo was created;
+  a canvas whose photo dedupes against an existing photo counts as
+  `skipped` (status `duplicate`), never as imported. A canvas whose
+  harvest FAILS — and a duplicate canvas — has its pre-created
+  item/note removed again, so failed/skipped canvases leave nothing
+  behind. Parser
   `lib/iiif/manifest.ts` (Presentation v2 sequences/canvases + v3
   items; first painting image per canvas; Image API service ids
   normalized to `{service}/full/max/0/default.jpg`). Choice
@@ -341,7 +358,15 @@ Types: `StorageCompressRequest`, `StorageCompressResponse`,
   manifest label. All fetches go through `lib/fetch-guard.ts` (https
   only; private/loopback/link-local/CGNAT/reserved IP literals +
   local hostnames rejected; redirects re-validated per hop; byte
-  caps). NOTE: the brief named `lib/link-policy.ts` as the existing
+  caps enforced WHILE streaming — the read aborts past the cap).
+  IPv6 literals are expanded before range checks, and embedded-IPv4
+  forms are unwrapped and checked as IPv4: IPv4-mapped
+  `::ffff:0:0/96` (dotted AND canonical hex tails), NAT64
+  `64:ff9b::/96` + local `64:ff9b:1::/48`, 6to4 `2002::/16`, Teredo
+  `2001::/32`; `198.18.0.0/15` (benchmarking) and the documentation
+  ranges (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`,
+  `2001:db8::/32`) are rejected; unparseable IPv6 literals are
+  refused. NOTE: the brief named `lib/link-policy.ts` as the existing
   SSRF policy — that module is the note-LINK allowlist, not an SSRF
   control, so the fetch guard is a new module built to the brief's
   rule and is the single reuse point for user-URL fetches. Known
@@ -356,15 +381,30 @@ Types: `StorageCompressRequest`, `StorageCompressResponse`,
   paste; synchronous result line + toasts).
 - Developer API (row 36): tokens `lib/token-core.ts` (pure:
   `ezv_` + 32 random bytes; SHA-256 hash at rest; display prefix;
-  constant-time digest compare mirroring `lib/auth.ts`) +
+  a constant-time digest-compare helper, `verifyApiToken`, kept for
+  token tooling and unit-tested) +
   `lib/token-auth.ts` (`enforceTokenScope(req, scope)`: no bearer =
   human path no-op; presented bearer must be a live token with the
   exact scope — revoked/expired 401, under-scoped 403, `last_used_at`
-  stamped). Scopes: `read`, `notes:write` (neither implies the other).
+  stamped). Live verification is a DB hash lookup: the presented
+  token is SHA-256 hashed and matched with
+  `WHERE token_hash = hash(presented)` — safe for 256-bit random
+  tokens (the stored hash is never disclosed and there is no
+  practical timing oracle); the constant-time helper is NOT the
+  live path. Scopes: `read`, `notes:write` (neither implies the other).
   Documented subset (DEVELOPER-API.md): GET projects / project /
   items / item / item photos / photo / photo notes / selection notes /
-  note; POST photo + selection notes; PATCH note. Note DELETE denies
-  presented tokens (delete is outside the scopes); token management
+  note; POST photo + selection notes; PATCH note. Subset denial is
+  GLOBAL, not opt-in (fix B1): `lib/token-guard.ts` holds the ONE
+  method-aware allowlist and `proxy.ts` runs it BEFORE every /api
+  handler — a presented `ezv_` bearer on any (method, path) outside
+  the subset gets 403 immediately, including undocumented methods
+  inside documented files (project PATCH/DELETE), exports, and
+  `POST /api/admin/delete-everything`. Requests with no bearer, or
+  with a non-token bearer (e.g. the cron secret), are completely
+  unaffected; validity/scope checks on subset routes stay in the
+  handlers. Note DELETE denies presented tokens (delete is outside
+  the scopes); token management
   (`GET|POST /api/api-tokens`, `DELETE /api/api-tokens/[tokenId]`) is
   human-only and returns the plaintext secret exactly once (201).
   Platform note (binding, also in DEVELOPER-API.md): Vercel
@@ -375,4 +415,7 @@ Types: `StorageCompressRequest`, `StorageCompressResponse`,
   (canonical method, INTEGRATION-DECISIONS.md — 11 files, 0 missing):
   the IIIF tab, Omeka settings/push + token settings UI, and the
   Inspector push button only; all Wave D logic is server-side. No ADR
-  needed. Zero new dependencies this wave.
+  needed. Zero new dependencies this wave. QA-BLOCK fix round
+  (B1/B2 + findings 3/4/5/6): all changes are server-side (proxy,
+  fetch guard, Omeka/IIIF services) — First Load JS re-measured
+  **215.03 KB gzip (11 files, 0 missing), delta +0.00 KB**.
