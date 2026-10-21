@@ -24,6 +24,7 @@ import {
   detectKind,
   needsBrowserConversion,
   needsServerConversion,
+  mimetypeForKind,
   sha256File,
   extractExif,
   formatBytes,
@@ -109,6 +110,10 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
   const [duplicatePolicy, setDuplicatePolicy] = useState<"skip" | "keep_both" | "ask">(
     (project?.duplicate_policy as "skip" | "keep_both" | "ask") ?? "skip",
   );
+  // Wave B1 (rows 7 + 34): batch render density (PPI; "" = project default)
+  // and the multi-page grouping choice (default: pages grouped in one item).
+  const [batchDensity, setBatchDensity] = useState("");
+  const [groupPages, setGroupPages] = useState(true);
   const [jobId, setJobId] = useState<string | null>(null);
   // Folder uploads: the dir → { list_id } mapping minted by folder-session
   // (called in run(), after hashing — the server needs per-file sha256).
@@ -241,7 +246,7 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
           const path = normSessionPath(f.relativePath!);
           const main = {
             path,
-            mimetype: f.file.type || "application/octet-stream",
+            mimetype: f.file.type || mimetypeForKind(f.kind),
             size: f.file.size,
             sha256: f.sha256,
           };
@@ -264,7 +269,7 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
           const base = {
             sha256: f.sha256,
             size: f.file.size,
-            mimetype: f.file.type || "application/octet-stream",
+            mimetype: f.file.type || mimetypeForKind(f.kind),
             filename: f.file.name,
           };
           return f.artifact && f.artifactSha256
@@ -292,7 +297,7 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
         const upArt = f.artifact && f.artifactSha256 ? grantFor(true) : undefined;
         if (!up) throw new Error("staging missing");
         patchQueue(f.localId, { status: "uploading", progress: 0.45 });
-        await putWithProgress(up.url, f.file, f.file.type || "application/octet-stream",
+        await putWithProgress(up.url, f.file, f.file.type || mimetypeForKind(f.kind),
           (loaded, total) => patchQueue(f.localId, { progress: 0.45 + 0.35 * (loaded / total) }), signal);
         f.key = up.key;
         if (f.artifact && upArt) {
@@ -305,18 +310,23 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
 
       // 4. Complete → job.
       for (const f of ready) patchQueue(f.localId, { status: "completing", progress: 0.95 });
+      const densityNum = Math.round(Number(batchDensity));
+      const densityOpt = densityNum >= 36 && densityNum <= 1200 ? densityNum : undefined;
       const completeFiles: CompleteFile[] = ready.flatMap((f) => {
         const main: CompleteFile = {
           key: f.key!,
           sha256: f.sha256,
           size: f.file.size,
-          mimetype: f.file.type || "application/octet-stream",
+          mimetype: f.file.type || mimetypeForKind(f.kind),
           filename: f.file.name,
           relative_path: f.relativePath,
           // F2 primary path: the folder-session grant's list_id. Absent for
           // plain file batches (land in All Items); conversion artifacts are
           // decode sources, never filed as their own photos.
           listId: listIdByKey.get(f.key!) ?? undefined,
+          // Wave B1: batch density + page grouping for this file.
+          density: densityOpt,
+          groupIntoItem: groupPages,
         };
         return f.artifactKey && f.artifactSha256
           ? [main, {
@@ -375,6 +385,7 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
       }
       await applyFileTemplates(result.accepted, ready);
       await startJob(result.job_id, ready);
+      await processAccepted(result.accepted, result.job_id);
     } catch (err) {
       if (err instanceof Error && err.message === "cancelled") {
         pushToast({ message: t("cancelJob") });
@@ -389,6 +400,43 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
   async function startJob(id: string, ready: QueueFile[]) {
     setJobId(id);
     for (const f of ready) patchQueue(f.localId, { status: "processing", progress: 0.97 });
+  }
+
+  // Wave B1: drive /process once per accepted photo (the documented
+  // client-orchestration contract — the job's done counter only moves
+  // inside processPhoto). A multi-page PDF/TIFF's page-0 call returns
+  // split_photo_ids; each split page is then processed with the SAME
+  // staged key (the server falls back to the finalized page-0 original
+  // once the staged object is consumed). Failures surface through the
+  // job poll (failed count + error), so per-call errors are swallowed.
+  async function processAccepted(
+    accepted: { key: string; photo_subject_id: string }[],
+    jobId: string,
+  ) {
+    for (const a of accepted) {
+      try {
+        const res = await post<{ split_photo_ids?: string[] }>("/api/import/process", {
+          job_id: jobId,
+          project_id: projectId,
+          photo_subject_id: a.photo_subject_id,
+          staged_key: a.key,
+        });
+        for (const sid of res.split_photo_ids ?? []) {
+          try {
+            await post("/api/import/process", {
+              job_id: jobId,
+              project_id: projectId,
+              photo_subject_id: sid,
+              staged_key: a.key,
+            });
+          } catch {
+            /* surfaced via job polling */
+          }
+        }
+      } catch {
+        /* surfaced via job polling */
+      }
+    }
   }
 
   // SHOULD-18: apply per-file template choices to the items complete() just
@@ -441,6 +489,7 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
       const ready = queue.filter((f) => f.sha256);
       await applyFileTemplates(result.accepted, ready);
       await startJob(result.job_id, ready);
+      await processAccepted(result.accepted, result.job_id);
     } catch (err) {
       pushToast({ message: err instanceof Error ? err.message : "import failed", kind: "error" });
       setRunning(false);
@@ -715,17 +764,37 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
                 <option value="ask">{t("policyAsk")}</option>
               </select>
             </label>
-            {/* SHOULD-18: page-grouping toggle. Rendered disabled with an honest
-                tooltip (the "Merge items (wave 2)" precedent): the pipeline
-                never splits pages today — one file is always one item — so a
-                live toggle would be a lying affordance. Page splitting is
-                wave-2 parity item #34. */}
+            {/* Wave B1 (row 34): page-grouping toggle — LIVE. Multi-page
+                PDF/TIFF files split into one photo per page; checked keeps
+                the pages in one item, unchecked gives one item per page. */}
             <label
-              style={{ fontSize: 12, color: "var(--ink-3)" }}
+              style={{ fontSize: 12 }}
               title={t("groupIntoItemHint")}
             >
-              <input type="checkbox" checked disabled style={{ marginRight: 4 }} />
+              <input
+                type="checkbox"
+                checked={groupPages}
+                onChange={(e) => setGroupPages(e.target.checked)}
+                style={{ marginRight: 4 }}
+              />
               {t("groupIntoItem")}
+            </label>
+            {/* Wave B1 (row 7): batch render density for PDF/SVG files.
+                Empty = the project default from Project settings. */}
+            <label style={{ fontSize: 12 }} title={t("densityHint")}>
+              {t("densityLabel")}{" "}
+              <input
+                type="number"
+                className="ez-input"
+                style={{ width: 76, fontSize: 12 }}
+                min={36}
+                max={1200}
+                step={1}
+                value={batchDensity}
+                onChange={(e) => setBatchDensity(e.target.value)}
+                placeholder={t("densityProjectDefault", { density: project?.default_density ?? 300 })}
+                aria-label={t("densityLabel")}
+              />
             </label>
             {folderMapping ? (
               <span style={{ fontSize: 11, color: "var(--ink-2)" }}>

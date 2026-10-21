@@ -146,6 +146,10 @@ export interface Photo {
   exif: Record<string, unknown>;
   template_id: Id | null;
   position: number;
+  /** 0-based page index within a multi-page source file (row 34). */
+  page: number;
+  /** Per-photo render-density override (PPI); null = project default. */
+  density: number | null;
   created_at: string;
 }
 
@@ -169,6 +173,8 @@ export function adaptPhoto(raw: WirePhoto): Photo {
     exif: raw.exif ?? {},
     template_id: raw.template_id,
     position: raw.position,
+    page: raw.page ?? 0,
+    density: raw.density ?? null,
     created_at: raw.created_at,
   };
 }

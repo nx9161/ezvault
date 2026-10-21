@@ -32,6 +32,17 @@ describe('magic bytes (B1)', () => {
     assert.equal(magicMatchesMimetype('application/pdf', jpg), false);
     assert.equal(magicMatchesMimetype('image/heic', jpg), false);
   });
+  it('detects pdf + jp2000 (Wave B1 rows 7/6b)', () => {
+    assert.equal(detectFormat(Buffer.from('%PDF-1.7\n%âãÏÓ')), 'pdf');
+    const sigBox = head([0x00, 0x00, 0x00, 0x0c, 0x6a, 0x50, 0x20, 0x20, 0x0d, 0x0a, 0x87, 0x0a]);
+    assert.equal(detectFormat(sigBox), 'jp2');
+    assert.equal(detectFormat(head([0xff, 0x4f, 0xff, 0x51])), 'jp2'); // raw codestream SOC
+    assert.equal(magicMatchesMimetype('application/pdf', Buffer.from('%PDF-1.4')), true);
+    assert.equal(magicMatchesMimetype('image/jp2', sigBox), true);
+    assert.equal(magicMatchesMimetype('image/jp2', Buffer.from('%PDF-1.4')), false);
+    assert.equal(mimetypeForFormat('pdf'), 'application/pdf');
+    assert.equal(mimetypeForFormat('jp2'), 'image/jp2');
+  });
   it('detectFromBytes is the detectFormat alias', () => {
     assert.equal(detectFromBytes, detectFormat);
   });

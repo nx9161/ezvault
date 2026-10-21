@@ -11,7 +11,7 @@
 
 export type DetectedFormat =
   | 'jpg' | 'png' | 'gif' | 'webp' | 'svg' | 'tiff'
-  | 'heic' | 'heif' | 'avif';
+  | 'heic' | 'heif' | 'avif' | 'pdf' | 'jp2';
 
 const HEIC_BRANDS = new Set([
   'heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'hevm', 'hevs',
@@ -28,6 +28,25 @@ function ascii(buf: Buffer, start: number, len: number): string {
  * bytes match none of the v1 allowlist signatures.
  */
 export function detectFormat(head: Buffer): DetectedFormat | null {
+  // PDF: "%PDF-" header (ISO 32000) — checked first; a PDF can embed
+  // arbitrary binary (including JPEG streams) later in the file.
+  if (head.length >= 5 && ascii(head, 0, 5) === '%PDF-') {
+    return 'pdf';
+  }
+  // JPEG 2000 (ISO/IEC 15444): the .jp2 container opens with the 12-byte
+  // signature box 00 00 00 0C 6A 50 20 20 0D 0A 87 0A ("jP  "); a raw
+  // codestream (.j2k/.j2c) starts with the SOC marker FF 4F FF 51.
+  if (
+    head.length >= 12 &&
+    head[0] === 0x00 && head[1] === 0x00 && head[2] === 0x00 && head[3] === 0x0c &&
+    head[4] === 0x6a && head[5] === 0x50 && head[6] === 0x20 && head[7] === 0x20 &&
+    head[8] === 0x0d && head[9] === 0x0a && head[10] === 0x87 && head[11] === 0x0a
+  ) {
+    return 'jp2';
+  }
+  if (head.length >= 4 && head[0] === 0xff && head[1] === 0x4f && head[2] === 0xff && head[3] === 0x51) {
+    return 'jp2';
+  }
   if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) {
     return 'jpg';
   }
@@ -88,6 +107,10 @@ export function magicMatchesMimetype(mimetype: string, head: Buffer): boolean {
     case 'image/heic': return detected === 'heic' || detected === 'heif';
     case 'image/heif': return detected === 'heif' || detected === 'heic';
     case 'image/avif': return detected === 'avif';
+    case 'application/pdf': return detected === 'pdf';
+    case 'image/jp2': return detected === 'jp2';
+    case 'image/jpx': return detected === 'jp2';
+    case 'image/jpm': return detected === 'jp2';
     default: return false;
   }
 }
@@ -104,6 +127,8 @@ export function mimetypeForFormat(format: DetectedFormat): string {
     case 'heic': return 'image/heic';
     case 'heif': return 'image/heif';
     case 'avif': return 'image/avif';
+    case 'pdf': return 'application/pdf';
+    case 'jp2': return 'image/jp2';
   }
 }
 

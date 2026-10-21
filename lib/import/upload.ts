@@ -27,6 +27,10 @@ export interface CompleteFile {
   /** For browser-decoded artifacts: the original file's staged key. */
   conversion_of?: string;
   relative_path?: string;
+  /** Wave B1 (row 7): batch render density (PPI) for PDF/SVG files. */
+  density?: number;
+  /** Wave B1 (row 34): group a multi-page file's pages into one item. */
+  groupIntoItem?: boolean;
   /**
    * Folder-session grant's list_id: the server files the new photo into
    * this list in the SAME transaction (F2). Primary filing path — the
@@ -102,6 +106,8 @@ export async function completeImport(
       filename: f.filename,
       ...(f.relative_path ? { relative_path: f.relative_path } : {}),
       ...(f.listId ? { listId: f.listId } : {}),
+      ...(f.density ? { density: f.density } : {}),
+      ...(f.groupIntoItem ? { groupIntoItem: true } : {}),
     })),
     conversions: files
       .filter((f) => f.conversion_of)

@@ -15,7 +15,9 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { thumbUrl } from "@/lib/api/hooks";
-import { post } from "@/lib/api/client";
+import { post, patch } from "@/lib/api/client";
+import { mutate } from "swr";
+import { useUiStore } from "@/lib/store/ui";
 import {
   runCommand,
   setEditsOp,
@@ -133,6 +135,22 @@ export default function PhotoViewer({
   const gestureBefore = useRef<PhotoEdits | null>(null);
   /** last server-known edits (gesture diffing must not mutate the SWR object) */
   const serverEdits = useRef<PhotoEdits>({ ...DEFAULT_EDITS, ...(photo.edits ?? {}) });
+
+  // Wave B1 (row 7): per-photo render-density override input (PPI).
+  const pushToast = useUiStore((s) => s.pushToast);
+  const [densityInput, setDensityInput] = useState("");
+  useEffect(() => {
+    setDensityInput(photo.density ? String(photo.density) : "");
+  }, [photo.id, photo.density]);
+
+  async function applyDensity(value: number | null) {
+    try {
+      await patch(`/api/projects/${projectId}/photos/${photo.id}`, { density: value });
+      await mutate((k) => typeof k === "string" && k.includes(`/api/projects/${projectId}/`));
+    } catch (err) {
+      pushToast({ message: err instanceof Error ? err.message : "density save failed", kind: "error" });
+    }
+  }
 
   // The edit surface always renders the photo fit-to-frame. Zooming,
   // panning, and 1:1 live in the lightbox now (W2-A swap).
@@ -575,6 +593,55 @@ export default function PhotoViewer({
               <output>{edits[k]}</output>
             </div>
           ))}
+          {/* Wave B1 (row 7): per-photo render-density override — only for
+              the formats density applies to (PDF/SVG/TIFF). Empty = the
+              project default; stored on photos.density via the photo
+              PATCH route and used by import rendering + export baking. */}
+          {["application/pdf", "image/svg+xml", "image/tiff"].includes(photo.mimetype) ? (
+            <div className="ez-toggle-row">
+              <span style={{ width: 110 }}>{t("density")}</span>
+              <input
+                type="number"
+                className="ez-input"
+                style={{ width: 76, fontSize: 12 }}
+                min={36}
+                max={1200}
+                step={1}
+                value={densityInput}
+                onChange={(e) => setDensityInput(e.target.value)}
+                placeholder={photo.density ? String(photo.density) : "300"}
+                aria-label={t("density")}
+                title={t("densityHint")}
+              />
+              <button
+                type="button"
+                className="ez-btn ez-btn--sm"
+                onClick={() => {
+                  const n = Math.round(Number(densityInput));
+                  if (n >= 36 && n <= 1200) void applyDensity(n);
+                }}
+              >
+                {t("densityApply")}
+              </button>
+              {photo.density ? (
+                <button
+                  type="button"
+                  className="ez-btn ez-btn--sm"
+                  onClick={() => {
+                    setDensityInput("");
+                    void applyDensity(null);
+                  }}
+                >
+                  {t("densityClear")}
+                </button>
+              ) : null}
+              {photo.page > 0 || photo.mimetype === "application/pdf" ? (
+                <span style={{ fontSize: 11, color: "var(--ink-3)" }}>
+                  {t("pageLabel", { page: photo.page + 1 })}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           {editsDirty(edits) ? (
             <div>
               <div className="ez-chip-row" aria-label={t("editsApplied")}>

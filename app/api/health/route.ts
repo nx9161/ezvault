@@ -35,6 +35,26 @@ async function probeCodecs(): Promise<CodecStatus[]> {
   } catch (err) {
     results.push({ name: 'jsonld', status: 'error', detail: String(err).slice(0, 200) });
   }
+  // Wave B1 render layer: PDF (pdfjs-dist + @napi-rs/canvas) and JP2000
+  // (OpenJPEG WASM) — libvips in the pinned sharp build decodes neither.
+  try {
+    await import('pdfjs-dist/legacy/build/pdf.mjs');
+    await import('@napi-rs/canvas');
+    results.push({ name: 'pdf-render (pdf.js+canvas)', status: 'ok' });
+  } catch (err) {
+    results.push({ name: 'pdf-render (pdf.js+canvas)', status: 'error', detail: String(err).slice(0, 200) });
+  }
+  try {
+    // Filesystem probe (no require.resolve — the bundler must not trace
+    // the .wasm asset; the server loads it from node_modules at runtime).
+    const { existsSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const wasm = join(process.cwd(), 'node_modules', '@cornerstonejs', 'codec-openjpeg', 'dist', 'openjpegwasm_decode.wasm');
+    if (!existsSync(wasm)) throw new Error('openjpeg wasm missing');
+    results.push({ name: 'jp2-decode (openjpeg wasm)', status: 'ok' });
+  } catch (err) {
+    results.push({ name: 'jp2-decode (openjpeg wasm)', status: 'error', detail: String(err).slice(0, 200) });
+  }
   return results;
 }
 

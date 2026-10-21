@@ -24,6 +24,12 @@ export interface BakeOptions {
   format: 'png' | 'jpg';
   /** Selection rect — applied before the edit pipeline. */
   extract?: { x: number; y: number; width: number; height: number };
+  /**
+   * Wave B1 (row 7): rasterization density (PPI) for vector inputs (SVG).
+   * Ignored by sharp for raster inputs. Callers pass the photo's stored
+   * density (photos.density) so exports match the import render.
+   */
+  density?: number;
 }
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -44,7 +50,10 @@ export async function bakeImage(input: Buffer, opts: BakeOptions): Promise<Buffe
   const saturation = clamp(Number(e.saturation ?? 0), -100, 100);
   const sharpen = clamp(Number(e.sharpen ?? 0), 0, 100);
 
-  let pipeline = sharp(input, { limitInputPixels: 50_000_000 });
+  let pipeline = sharp(input, {
+    limitInputPixels: 50_000_000,
+    ...(opts.density ? { density: opts.density } : {}),
+  });
 
   // Selection export: extract region first (§6.4).
   if (opts.extract) {
@@ -85,10 +94,14 @@ export async function bakeImage(input: Buffer, opts: BakeOptions): Promise<Buffe
 /**
  * Render the 1600px WebP q80 thumbnail derivative (ADR-2.4: exactly ONE
  * derivative, pre-generated at upload). Never enlarges small images.
+ * `density` (Wave B1) rasterizes SVG inputs at the chosen PPI.
  */
-export async function renderThumb(input: Buffer): Promise<Buffer> {
+export async function renderThumb(input: Buffer, density?: number): Promise<Buffer> {
   const { default: sharp } = await import('sharp');
-  return sharp(input, { limitInputPixels: 50_000_000 })
+  return sharp(input, {
+    limitInputPixels: 50_000_000,
+    ...(density ? { density } : {}),
+  })
     .rotate() // EXIF auto-orient
     .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
     .webp({ quality: 80 })

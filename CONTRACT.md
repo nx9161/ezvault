@@ -127,6 +127,24 @@ Types: `StorageCompressRequest`, `StorageCompressResponse`,
 `StoragePruneResponse` in `lib/types.ts`; prune implementation
 `pruneTrashPhotos()` in `lib/api/shapes.ts`.
 
+## Wave B1 — PDF/JP2000 import, render density, page splitting (rows 7/34/6b)
+
+- Upload allowlist gains `application/pdf` + `image/jp2` (`UPLOAD_MIMETYPES`,
+  magic bytes in `lib/import/magic.ts`: `%PDF-`, JP2 signature box, J2K SOC).
+- PDF/JP2000 decode server-side via `lib/import/render.ts` (pdfjs-dist +
+  @napi-rs/canvas; OpenJPEG WASM) — the pinned libvips decodes neither.
+- Density (PPI): `projects.default_density` (migration 0008, PATCH
+  `/api/projects/[id]` accepts `default_density` 36..1200) → per-file
+  `density` on POST `/api/import/complete` files[] → `photos.density`
+  (PATCH `/api/projects/[id]/photos/[photoId]` accepts `density`, null
+  clears). Resolution order: photo → project → 300 (`lib/import/density.ts`).
+- Page splitting: multi-page PDF/TIFF imports create one photo row per
+  page (`photos.page`, 0-based). POST `/api/import/complete` files[] accept
+  `groupIntoItem` (pages share one item; absent = one item per page),
+  stashed as job checkpoint `group_pages`. POST `/api/import/process`
+  response gains `split_photo_ids` (rows the client must process next,
+  same staged key); an upload job flips to `done` when done ≥ total.
+
 ## Binding rules (from the War Room — non-negotiable)
 
 - Clean-room: ZERO Tropy code, icons, copy, or artwork. All UI copy is original.

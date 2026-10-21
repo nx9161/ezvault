@@ -57,6 +57,8 @@ export interface Project {
   default_template_id: UUID | null;
   duplicate_policy: DuplicatePolicy;
   notes_export_format: NotesExportFormat;
+  /** Wave B1: global default render density (PPI) for PDF/SVG rasterization. */
+  default_density: number;
   created_at: string;
   updated_at: string;
 }
@@ -73,6 +75,8 @@ export interface UpdateProjectRequest {
   default_template_id?: UUID | null;
   duplicate_policy?: DuplicatePolicy;
   notes_export_format?: NotesExportFormat;
+  /** Wave B1: global default render density (PPI), 36..1200. */
+  default_density?: number;
   clientOpId?: UUID;
 }
 
@@ -213,6 +217,8 @@ export interface UpdatePhotoRequest {
   template_id?: UUID | null;
   position?: number;
   keep_original?: boolean;
+  /** Wave B1: per-photo render-density override (PPI); null clears it. */
+  density?: number | null;
   clientOpId?: UUID;
 }
 
@@ -489,7 +495,7 @@ export interface TrashEntry {
 // Import — photo pipeline (§2.11)
 // ---------------------------------------------------------------------------
 
-/** v1 upload allowlist (10 formats). */
+/** v1 upload allowlist (10 formats) + Wave B1: PDF + JP2000 (rows 7/6b). */
 export const UPLOAD_MIMETYPES = [
   'image/jpeg',
   'image/png',
@@ -500,6 +506,8 @@ export const UPLOAD_MIMETYPES = [
   'image/heic',
   'image/heif',
   'image/avif',
+  'application/pdf',
+  'image/jp2',
 ] as const;
 export type UploadMimetype = (typeof UPLOAD_MIMETYPES)[number];
 
@@ -555,6 +563,11 @@ export interface ImportCompleteFile {
   list_id?: UUID | null;
   relativePath?: string;
   relative_path?: string;
+  /** Wave B1: batch render density (PPI) chosen in ImportDialog. */
+  density?: number;
+  /** Wave B1: group a multi-page file's pages into one item (row 34). */
+  groupIntoItem?: boolean;
+  group_into_item?: boolean;
 }
 
 export interface ImportCompleteRequest {

@@ -36,8 +36,16 @@ export const GET = handle(async (req: Request, ctx: Ctx) => {
   }
 
   const storage = await getStorageDriver();
-  const originalBytes = await storage.getBytes(photo.r2_key);
-  const baked = await bakeImage(originalBytes, { edits: photo.edits, format });
+  const rawBytes = await storage.getBytes(photo.r2_key);
+  // Wave B1: PDF/JP2 originals rasterize via the render layer at the
+  // photo's page + stored density before baking; SVG density goes to
+  // sharp through bakeImage.
+  const { rasterizeOriginalForBake } = await import('@/lib/import/render');
+  const { resolveDensity } = await import('@/lib/import/density');
+  const projRows = await sql()`SELECT default_density FROM projects WHERE id = ${id}`;
+  const density = resolveDensity(photo.density, projRows.length ? Number(projRows[0]['default_density']) : null);
+  const originalBytes = await rasterizeOriginalForBake(rawBytes, photo.mimetype, photo.page, density);
+  const baked = await bakeImage(originalBytes, { edits: photo.edits, format, density });
 
   const exportKey = keys.exportFile(randomUUID(), `${photo.original_filename.replace(/\.[^.]+$/, '')}-baked.${format === 'jpg' ? 'jpg' : 'png'}`);
   await storage.putBytes(exportKey, baked, {

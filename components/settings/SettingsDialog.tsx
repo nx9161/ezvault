@@ -32,6 +32,7 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
   const [defaultTemplate, setDefaultTemplate] = useState("");
   const [duplicatePolicy, setDuplicatePolicy] = useState("skip");
   const [notesFormat, setNotesFormat] = useState("html");
+  const [defaultDensity, setDefaultDensity] = useState("300");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteEverythingOpen, setDeleteEverythingOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -42,6 +43,7 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
       setDefaultTemplate(project.default_template_id ?? "");
       setDuplicatePolicy(project.duplicate_policy);
       setNotesFormat(project.notes_export_format);
+      setDefaultDensity(String(project.default_density ?? 300));
     }
   }, [project]);
 
@@ -55,6 +57,7 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
         default_template_id: defaultTemplate || null,
         duplicate_policy: duplicatePolicy,
         notes_export_format: notesFormat,
+        default_density: Math.min(1200, Math.max(36, Math.round(Number(defaultDensity) || 300))),
       });
       await mutateProject();
       pushToast({ message: t("saved") });
@@ -140,6 +143,20 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
               <option value="html">{t("notesHtml")}</option>
               <option value="markdown">{t("notesMarkdown")}</option>
             </select>
+          </div>
+          <div className="ez-field">
+            <label htmlFor="ez-settings-density">{t("defaultDensity")}</label>
+            <input
+              id="ez-settings-density"
+              className="ez-input"
+              type="number"
+              min={36}
+              max={1200}
+              step={1}
+              value={defaultDensity}
+              onChange={(e) => setDefaultDensity(e.target.value)}
+            />
+            <p className="ez-notice">{t("defaultDensityHint")}</p>
           </div>
           <div className="ez-field">
             <span className="ez-field-label">{t("help")}</span>

@@ -19,7 +19,7 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   await requireProject(id);
   const body = await parseJson<{
     name?: string; default_template_id?: string | null; duplicate_policy?: string;
-    notes_export_format?: string; clientOpId?: string;
+    notes_export_format?: string; default_density?: number; clientOpId?: string;
   }>(req);
 
   const sets: string[] = [];
@@ -51,6 +51,14 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
       throw new HttpError(400, 'validation', 'invalid notes_export_format');
     }
     push('notes_export_format =', body.notes_export_format);
+  }
+  if (body.default_density !== undefined) {
+    // Wave B1 (row 7): global default render density (PPI) for PDF/SVG.
+    const { isValidDensity } = await import('@/lib/import/density');
+    if (!isValidDensity(body.default_density)) {
+      throw new HttpError(400, 'validation', 'default_density must be an integer between 36 and 1200');
+    }
+    push('default_density =', body.default_density);
   }
   if (!sets.length) throw new HttpError(400, 'validation', 'nothing to update');
 

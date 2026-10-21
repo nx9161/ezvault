@@ -44,6 +44,29 @@ export function needsServerConversion(kind: ImportKind): boolean {
   return kind === "avif" || kind === "jp2" || kind === "pdf" || kind === "svg";
 }
 
+/**
+ * Canonical mimetype for a detected kind. Browsers report an empty
+ * `file.type` for .jp2 (and occasionally .pdf/.tiff) files; presign signs
+ * the Content-Type, so the client must claim the real type — derived
+ * from the extension — instead of application/octet-stream.
+ */
+export function mimetypeForKind(kind: ImportKind): string {
+  switch (kind) {
+    case "jpeg": return "image/jpeg";
+    case "png": return "image/png";
+    case "gif": return "image/gif";
+    case "webp": return "image/webp";
+    case "tiff": return "image/tiff";
+    case "heic": return "image/heic";
+    case "heif": return "image/heif";
+    case "avif": return "image/avif";
+    case "jp2": return "image/jp2";
+    case "pdf": return "application/pdf";
+    case "svg": return "image/svg+xml";
+    default: return "application/octet-stream";
+  }
+}
+
 /** SHA-256 of a File/Blob via SubtleCrypto, streaming in 8MB chunks. */
 export async function sha256File(
   blob: Blob,

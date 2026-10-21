@@ -32,12 +32,14 @@ export const POST = handle(async (req: Request) => {
   if (!body.staged_key) throw new HttpError(400, 'validation', 'staged_key is required');
   await requireProject(body.project_id);
 
-  const jobRows = await sql()`SELECT checkpoint FROM import_jobs
+  const jobRows = await sql()`SELECT checkpoint, kind FROM import_jobs
     WHERE id = ${body.job_id} AND project_id = ${body.project_id}`;
   if (!jobRows.length) throw new HttpError(404, 'not_found', 'import job not found');
   const checkpoint = (jobRows[0]['checkpoint'] ?? {}) as {
     conversions?: Record<string, string>; exif?: Record<string, Record<string, unknown>>;
+    group_pages?: Record<string, boolean>;
   };
+  const jobKind = jobRows[0]['kind'] as string;
 
   const photoRows = await sql()`SELECT p.subject_id, p.mimetype, p.original_filename, p.item_id,
       p.checksum_sha256, p.r2_key
@@ -82,10 +84,19 @@ export const POST = handle(async (req: Request) => {
       stagedKey,
       artifactKey,
       clientExif,
+      // Wave B1 (row 34): upload/folder jobs split multi-page PDF/TIFF
+      // into one photo per page; grouping per the ImportDialog choice
+      // stashed at /complete. Other job kinds never split here.
+      splitPages: jobKind === 'upload' || jobKind === 'folder',
+      groupIntoItem: checkpoint.group_pages?.[stagedKey] === true,
     });
     const photo = await getPhotoJson(body.project_id, result.photoSubjectId);
+    // Wave B1: an upload job is done when every photo (including split
+    // pages, which grow `total` during expansion) has been processed.
+    await sql()`UPDATE import_jobs SET status = 'done', updated_at = now()
+      WHERE id = ${body.job_id} AND status = 'running' AND done >= total AND failed = 0`;
     const rev = await sql()`SELECT rev FROM projects WHERE id = ${body.project_id}`;
-    return ok({ photo, job_id: body.job_id, rev: Number(rev[0]['rev']) });
+    return ok({ photo, job_id: body.job_id, rev: Number(rev[0]['rev']), split_photo_ids: result.splitPhotoIds });
   } catch (err) {
     if (err instanceof HttpError) throw err; // B5/B6/etc. carry their own status
     // F-B2: never leak sharp/libvips/DB internals to the client — log

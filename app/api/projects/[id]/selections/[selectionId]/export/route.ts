@@ -38,10 +38,17 @@ export const GET = handle(async (req: Request, ctx: Ctx) => {
   }
 
   const storage = await getStorageDriver();
-  const originalBytes = await storage.getBytes(photo.r2_key);
+  const rawBytes = await storage.getBytes(photo.r2_key);
+  // Wave B1: same PDF/JP2/SVG-density rasterization as photo export.
+  const { rasterizeOriginalForBake } = await import('@/lib/import/render');
+  const { resolveDensity } = await import('@/lib/import/density');
+  const projRows = await sql()`SELECT default_density FROM projects WHERE id = ${id}`;
+  const density = resolveDensity(photo.density, projRows.length ? Number(projRows[0]['default_density']) : null);
+  const originalBytes = await rasterizeOriginalForBake(rawBytes, photo.mimetype, photo.page, density);
   const baked = await bakeImage(originalBytes, {
     edits: photo.edits,
     format,
+    density,
     extract: {
       x: Number(sel[0]['x']), y: Number(sel[0]['y']),
       width: Number(sel[0]['width']), height: Number(sel[0]['height']),

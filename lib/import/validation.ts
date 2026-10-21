@@ -40,6 +40,8 @@ export function stagedExtension(mimetype: string): string {
     case 'image/heic': return 'heic';
     case 'image/heif': return 'heif';
     case 'image/avif': return 'avif';
+    case 'application/pdf': return 'pdf';
+    case 'image/jp2': return 'jp2';
     default: throw new Error(`mimetype not on v1 allowlist: ${mimetype}`);
   }
 }

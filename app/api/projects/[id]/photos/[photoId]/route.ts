@@ -2,6 +2,7 @@
 import { handle, ok, parseJson, requireProject, HttpError } from '@/lib/api/route-utils';
 import { sql, tx, bumpRevQuery } from '@/lib/db/index';
 import { getPhotoJson, trashSubject } from '@/lib/api/shapes';
+import { isValidDensity } from '@/lib/import/density';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -18,7 +19,8 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   const { id, photoId } = await ctx.params;
   await requireProject(id);
   const body = await parseJson<{
-    template_id?: string | null; position?: number; keep_original?: boolean; clientOpId?: string;
+    template_id?: string | null; position?: number; keep_original?: boolean;
+    density?: number | null; clientOpId?: string;
   }>(req);
   const chk = await sql()`SELECT subject_id FROM photos JOIN subjects s ON s.id = photos.subject_id
     WHERE photos.subject_id = ${photoId} AND s.project_id = ${id}`;
@@ -42,6 +44,14 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
     }
     if (body.keep_original !== undefined) {
       queries.push(qq(`UPDATE photos SET keep_original = $2 WHERE subject_id = $1`, [photoId, body.keep_original]));
+    }
+    if (body.density !== undefined) {
+      // Wave B1 (row 7): per-photo render-density override (PPI);
+      // null clears it back to the project default.
+      if (body.density !== null && !isValidDensity(body.density)) {
+        throw new HttpError(400, 'validation', 'density must be an integer between 36 and 1200, or null');
+      }
+      queries.push(qq(`UPDATE photos SET density = $2 WHERE subject_id = $1`, [photoId, body.density]));
     }
     queries.push(bumpRevQuery(id));
     if (body.clientOpId) {

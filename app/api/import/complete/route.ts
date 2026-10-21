@@ -6,6 +6,7 @@ import { magicMatchesMimetype, detectFromBytes, mimetypeForFormat } from '@/lib/
 import { isAllowedUploadMimetype, MAX_PHOTO_BYTES, MAGIC_PROBE_BYTES } from '@/lib/import/validation';
 import { verifyStagedSha256 } from '@/lib/import/process-photo';
 import { createPhotoRows, type PhotoEntry } from '@/lib/import/photos';
+import { isValidDensity } from '@/lib/import/density';
 import { requireRateLimit } from '@/lib/ratelimit';
 import { resolveItemTitles } from '@/lib/api/item-enrichment';
 import type { ImportCompletePhoto, ImportCompleteFile } from '@/lib/types';
@@ -81,6 +82,8 @@ export const POST = handle(async (req: Request) => {
 
   const entries: PhotoEntry[] = [];
   const acceptedKeys: string[] = [];
+  /** Wave B1 (row 34): staged key → group-pages-into-one-item choice. */
+  const groupPages: Record<string, boolean> = {};
   // F-I: rejected entries carry duplicate context so the UI can show
   // "already in: {title}". Only duplicate rejections have an existing
   // subject; the rest leave the optional fields unset.
@@ -147,7 +150,13 @@ export const POST = handle(async (req: Request) => {
       checksumSha256: claimed,
       exif: body.exif?.[key],
       relativePath: f.relativePath ?? f.relative_path ?? null,
+      // Wave B1 (row 7): the batch render density chosen in ImportDialog,
+      // stored per photo; /process falls back to the project default.
+      density: isValidDensity(f.density) ? f.density : null,
     });
+    // Wave B1 (row 34): grouping choice for multi-page files, stashed on
+    // the job checkpoint for /process (grouped = pages share one item).
+    if (f.groupIntoItem ?? f.group_into_item) groupPages[key] = true;
     acceptedKeys.push(key);
     // F2: explicit listId wins; otherwise resolve the relative path against
     // the folder job's dir_lists (server-minted by folder-session).
@@ -230,7 +239,7 @@ export const POST = handle(async (req: Request) => {
   // Stash conversions + exif on the job for /process (checkpoint, not rows).
   await sql()`UPDATE import_jobs
     SET checkpoint = COALESCE(checkpoint,'{}'::jsonb)
-        || ${JSON.stringify({ conversions, exif: body.exif ?? {} })}::jsonb,
+        || ${JSON.stringify({ conversions, exif: body.exif ?? {}, group_pages: groupPages })}::jsonb,
         status = 'running', updated_at = now()
     WHERE id = ${body.job_id}`;
 
