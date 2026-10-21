@@ -19,6 +19,11 @@ import 'server-only';
  * carries. The canvas label becomes the title field when the template
  * has one. Unmapped pairs are preserved verbatim in an item note (the
  * JSON-LD import's never-drop convention, lib/import/jsonld-accept.ts).
+ *
+ * Failure semantics (Wave D fix, finding 4): the per-canvas item is
+ * removed again when its image harvest fails or its photo dedupes —
+ * failed canvases leave nothing behind, and deduped canvases count as
+ * `skipped` in the job report, never as `imported`.
  */
 
 import { createHash, randomUUID } from 'node:crypto';
@@ -68,6 +73,8 @@ export interface IiifImportResult {
   manifest_label: string;
   version: 2 | 3;
   imported: number;
+  /** Canvases whose photo deduped against an existing photo — SKIPPED, not imported. */
+  skipped: number;
   failed: number;
   results: { canvas_id: string; title: string; status: 'imported' | 'duplicate' | 'failed'; item_id?: string; error?: string }[];
 }
@@ -106,10 +113,24 @@ export async function importIiifManifest(
 
   const results: IiifImportResult['results'] = [];
   let imported = 0;
+  let skipped = 0;
   let failed = 0;
 
   for (const entry of plan) {
     const itemId = randomUUID();
+    // Set once the item+note transaction commits: from then on, ANY
+    // failure (or a duplicate photo) must remove the pre-created item —
+    // a failed/skipped canvas never leaves a photo-less item behind
+    // (Wave D fix, finding 4; deleting the subject cascades to items,
+    // metadata, notes, list membership and any photo rows).
+    let itemCommitted = false;
+    const cleanupItem = async () => {
+      if (!itemCommitted) return;
+      await tx((q: (text: string, params?: unknown[]) => TxQuery) => [
+        q(`DELETE FROM subjects WHERE id = $1`, [itemId]),
+        bumpRevQuery(projectId),
+      ]).catch(() => { /* best effort — the job report still carries the failure */ });
+    };
     try {
       // Item + template-mapped metadata + preservation note (one txn).
       const { values, unmapped } = mapManifestMetadata(manifest, entry.title, template.fields);
@@ -132,6 +153,7 @@ export async function importIiifManifest(
         [itemId, noteLines.join('\n').slice(0, 100_000), JSON.stringify(noteStateFor(noteLines))]));
       queries.push(bumpRevQuery(projectId));
       await tx(() => queries);
+      itemCommitted = true;
 
       // Harvest the canvas image through the standard upload pipeline.
       const fetched = await guardedFetchBytes(entry.imageUrl, {
@@ -154,9 +176,14 @@ export async function importIiifManifest(
         listId,
       }], { itemId, duplicatePolicy: 'skip' });
       if (created.dedupe === 'skipped_duplicate') {
-        results.push({ canvas_id: entry.canvasId, title: entry.title, status: 'duplicate', item_id: itemId });
+        // Duplicate: the photo already exists in the project, so this
+        // canvas adds nothing — count it as SKIPPED (not imported) and
+        // remove the pre-created item (the bytes live on the existing
+        // photo's item, untouched).
+        await cleanupItem();
+        results.push({ canvas_id: entry.canvasId, title: entry.title, status: 'duplicate' });
         await sql()`UPDATE import_jobs SET done = done + 1, updated_at = now() WHERE id = ${jobId}`;
-        imported++;
+        skipped++;
         continue;
       }
       await processPhoto({
@@ -176,7 +203,10 @@ export async function importIiifManifest(
       const message = err instanceof SsrfError ? err.message
         : err instanceof HttpError ? err.message
         : err instanceof Error ? err.message : String(err);
-      results.push({ canvas_id: entry.canvasId, title: entry.title, status: 'failed', item_id: itemId, error: message.slice(0, 1000) });
+      // Failed harvest: remove the pre-created item + note so the
+      // project is left exactly as if this canvas never ran.
+      await cleanupItem();
+      results.push({ canvas_id: entry.canvasId, title: entry.title, status: 'failed', error: message.slice(0, 1000) });
       failed++;
       await sql()`UPDATE import_jobs SET failed = failed + 1, updated_at = now() WHERE id = ${jobId}`;
     }
@@ -185,5 +215,5 @@ export async function importIiifManifest(
   const status = failed === 0 ? 'done' : imported > 0 ? 'done' : 'failed';
   await sql()`UPDATE import_jobs SET status = ${status}, report = ${JSON.stringify({ manifest_url: manifestUrl, list_id: listId, label: manifest.label, results })}::jsonb,
     error = ${failed ? `${failed} canvas(es) failed to import` : null}, updated_at = now() WHERE id = ${jobId}`;
-  return { job_id: jobId, list_id: listId, manifest_label: manifest.label, version: manifest.version, imported, failed, results };
+  return { job_id: jobId, list_id: listId, manifest_label: manifest.label, version: manifest.version, imported, skipped, failed, results };
 }
