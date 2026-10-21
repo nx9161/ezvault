@@ -211,6 +211,14 @@ Types: `StorageCompressRequest`, `StorageCompressResponse`,
   map by name (created with source color when missing). Lists are NOT
   copied (copy lands unfiled); transcriptions are not copied (wave-C
   table, no v1 data). Target counters + rev bump in the copy transaction.
+- Bundle (corrected 2026-10-21, Wave C Task 0): the workspace route's
+  First Load JS at the close of Wave B2 is **211.93 KB gzip**, measured by
+  QA with the canonical method in INTEGRATION-DECISIONS.md
+  (build-manifest `rootMainFiles` + the route's non-async
+  client-reference-manifest chunks, per-file gzipped, summed;
+  QA-REPORT-PARITY-B.md §9). This supersedes the 249.59 KB figure quoted
+  during Wave B2, which was measured with a non-canonical method that
+  included async/lazy chunks and overstates first load by ~37.7 KB.
 - Print (rows 28 + 29): Ctrl/Cmd+P is registered (`print` in
   `lib/shortcuts/registry.ts`, labelled "Print current view (browser
   print)" in the `?` overlay). It sets `<body data-print>` — `inspector`
