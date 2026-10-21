@@ -3,6 +3,8 @@ import { handle, requireProject, HttpError } from '@/lib/api/route-utils';
 import { sql } from '@/lib/db/index';
 import { getStorageDriver, keys } from '@/lib/storage/driver';
 import { requireRateLimit } from '@/lib/ratelimit';
+import { requirePluginEnabled } from '@/lib/plugins/server';
+
 import { randomUUID } from 'node:crypto';
 
 export const runtime = 'nodejs';
@@ -19,6 +21,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export const GET = handle(async (req: Request, ctx: Ctx) => {
   const { id } = await ctx.params;
   const project = await requireProject(id);
+  await requirePluginEnabled(id, 'jsonld-export');
   await requireRateLimit('export:jsonld');
 
   const url = new URL(req.url);

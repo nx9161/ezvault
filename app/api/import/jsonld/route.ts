@@ -3,6 +3,8 @@ import { handle, ok, parseCappedJson, requireProject, HttpError } from '@/lib/ap
 import { acceptJsonLd } from '@/lib/import/jsonld-accept';
 import { requireRateLimit } from '@/lib/ratelimit';
 import { checkCpuGuard } from '@/lib/cpu-budget';
+import { requirePluginEnabled } from '@/lib/plugins/server';
+
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -25,6 +27,7 @@ export const POST = handle(async (req: Request) => {
   }>(req);
   if (!body.project_id) throw new HttpError(400, 'validation', 'project_id is required');
   await requireProject(body.project_id);
+  await requirePluginEnabled(body.project_id, 'jsonld-import');
   if (body.document === undefined || body.document === null || typeof body.document !== 'object') {
     throw new HttpError(400, 'validation', 'document (JSON-LD) is required');
   }

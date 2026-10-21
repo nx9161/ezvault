@@ -140,3 +140,12 @@ Not token routes — human-session features, documented in CONTRACT.md
 the item inspector; IIIF manifest import is a tab in the Import dialog.
 There is NO live public Omeka instance for EZVault: pushes can only be
 verified against your own Omeka S site.
+
+## Extensions note (Wave E part 2)
+
+API tokens do not interact with the extension registry
+(docs/PLUGINS.md): scopes and the documented subset above are
+unchanged. One interaction to know: if a project's owner disables an
+extension (e.g. `jsonld-export`) in Project settings, its routes
+refuse ALL callers — human session and token alike — with
+`403 plugin_disabled` until it is re-enabled.

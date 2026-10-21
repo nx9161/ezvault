@@ -2,6 +2,8 @@
 import { handle, ok, parseCappedJson, requireProject, HttpError } from '@/lib/api/route-utils';
 import { importCsvItems } from '@/lib/import/csv-import';
 import { requireRateLimit } from '@/lib/ratelimit';
+import { requirePluginEnabled } from '@/lib/plugins/server';
+
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -17,6 +19,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export const POST = handle(async (req: Request, ctx: Ctx) => {
   const { id } = await ctx.params;
   await requireProject(id);
+  await requirePluginEnabled(id, 'csv-import');
   await requireRateLimit('import:jsonld');
   const body = await parseCappedJson<{ csv?: unknown; template_id?: unknown }>(req);
   if (typeof body.csv !== 'string' || !body.csv.trim()) {

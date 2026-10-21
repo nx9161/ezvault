@@ -499,3 +499,43 @@ Types: `StorageCompressRequest`, `StorageCompressResponse`,
 - Bundle: workspace First Load JS **215.03 → 217.14 KB gzip
   (+2.11 KB)** (canonical method, 10 files, 0 missing). The generated
   SW (39,199 B) is not route JS.
+
+## Wave E (part 2) — Locales + plugin-equivalent extension surface (rows 35/36-adjacent)
+
+- Locales (row 35 CLOSED): 11 message catalogs under `messages/` —
+  `en` plus `de`, `es`, `fr`, `it`, `ja`, `nl`, `pt`, `pt-BR`, `uk`,
+  `zh`. The list is Tropy's shipped set (public 1.13 announcements:
+  English, French, German, Italian, Japanese, Chinese, Dutch,
+  Ukrainian, Spanish, Portuguese + the Brazilian Portuguese locale) —
+  NOTE it differs from early planning guesses: Ukrainian and pt-BR are
+  in, Polish and Russian are not Tropy locales. All catalogs are
+  ORIGINAL translations of EZVault's own `messages/en.json` (623 keys
+  each, identical key sets, placeholder/ICU parity enforced by
+  `test/locales.test.mjs`); no Tropy translation files were used
+  (clean-room, AGPL). Resolution: `i18n/request.ts` reads the
+  `ezv_locale` cookie through `resolveLocale()` (`lib/i18n/locales.ts`,
+  validated against the supported set, default `en`); ADR-2.13 stands
+  (localePrefix 'never', no route changes). Switcher: TopBar
+  `LocaleSwitcher` lists native names, sets the cookie, refreshes.
+  Messages are server-loaded for the ACTIVE locale only.
+- Extensions (docs/PLUGINS.md): Tropy's plugin model (separately
+  installed packages executing local code with full app access) is
+  `replaced` — arbitrary third-party code execution cannot be mirrored
+  safely in a hosted serverless app (AppSec + strict CSP). EZVault's
+  equivalent is an in-repo typed registry (`lib/plugins/registry.ts`:
+  id, version, kind ∈ export|import|integration|engine, i18n base,
+  docs anchor) covering the nine real built-ins that occupy Tropy's
+  plugin hook points: csv-export, archive-export, jsonld-export,
+  csv-import, jsonld-import, iiif-import, alto-import, omeka-push,
+  tesseract-ocr (engine). Enable/disable state is per project,
+  persisted in `plugin_settings` (migration 0012; no row = enabled),
+  served by `GET|PATCH /api/projects/[id]/plugins`, and ENFORCED by
+  `requirePluginEnabled()` (`lib/plugins/server.ts`) at the top of
+  every guarded route — disabled answers an honest
+  `403 plugin_disabled` before any work. For the client-side OCR
+  engine, enforcement sits at the persistence boundary (transcription
+  creates with `config.source='ocr'` are refused while off). Settings
+  UI: Project settings → Extensions (kind, version, localized
+  description, toggle). `test/plugins.test.mjs` asserts registry
+  integrity, per-locale name/description presence, state logic, and a
+  real enforcement point per id.

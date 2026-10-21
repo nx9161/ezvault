@@ -3,6 +3,8 @@ import { handle, requireProject, HttpError, isUuid } from '@/lib/api/route-utils
 import { loadExportItems } from '@/lib/export/items-data';
 import { buildItemsCsv } from '@/lib/export/csv-export';
 import { requireRateLimit } from '@/lib/ratelimit';
+import { requirePluginEnabled } from '@/lib/plugins/server';
+
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -19,6 +21,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export const GET = handle(async (req: Request, ctx: Ctx) => {
   const { id } = await ctx.params;
   const project = await requireProject(id);
+  await requirePluginEnabled(id, 'csv-export');
   await requireRateLimit('export:jsonld');
 
   const url = new URL(req.url);

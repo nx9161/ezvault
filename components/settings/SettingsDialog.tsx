@@ -50,6 +50,10 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
   const [tokenRead, setTokenRead] = useState(true);
   const [tokenWrite, setTokenWrite] = useState(false);
   const [tokenSecret, setTokenSecret] = useState("");
+  // Wave E part 2: extension (plugin) registry state for this project.
+  interface PluginView { id: string; version: string; kind: string; i18n_base: string; enabled: boolean }
+  const [plugins, setPlugins] = useState<PluginView[]>([]);
+  const tp = useTranslations("plugins");
 
   useEffect(() => {
     if (!open) return;
@@ -64,6 +68,10 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
         const list = await get<{ items: TokenView[] }>("/api/api-tokens");
         setTokens(list.items ?? []);
       } catch { /* token list stays empty */ }
+      try {
+        const list = await get<{ items: PluginView[] }>(`/api/projects/${projectId}/plugins`);
+        setPlugins(list.items ?? []);
+      } catch { /* extensions list stays empty */ }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open ]);
@@ -109,6 +117,19 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
       pushToast({ message: t("tokenCreated") });
     } catch (err) {
       pushToast({ message: err instanceof Error ? err.message : "create failed", kind: "error" });
+    }
+  }
+
+  async function togglePlugin(pluginId: string, enabled: boolean) {
+    try {
+      const res = await patch<{ items: PluginView[] }>(`/api/projects/${projectId}/plugins`, {
+        plugin_id: pluginId,
+        enabled,
+      });
+      setPlugins(res.items ?? []);
+      pushToast({ message: t("saved") });
+    } catch (err) {
+      pushToast({ message: err instanceof Error ? err.message : "save failed", kind: "error" });
     }
   }
 
@@ -330,6 +351,30 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
                 ))}
               </div>
             )}
+          </div>
+          <div className="ez-field">
+            <span className="ez-field-label">{t("pluginsTitle")}</span>
+            <p className="ez-notice">{t("pluginsNote")}</p>
+            {plugins.map((p) => (
+              <div key={p.id} className="ez-file-row">
+                <span className="ez-name">{tp(`${p.i18n_base}.name` as never)}</span>
+                <span style={{ fontSize: 11, color: "var(--ink-3)" }}>
+                  {tp(`kind${p.kind[0].toUpperCase()}${p.kind.slice(1)}` as never)} · {tp("version", { version: p.version })}
+                </span>
+                <span style={{ fontSize: 11, color: "var(--ink-3)", flex: 1 }}>
+                  {tp(`${p.i18n_base}.description` as never)}
+                </span>
+                <label style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <input
+                    type="checkbox"
+                    checked={p.enabled}
+                    onChange={(e) => void togglePlugin(p.id, e.target.checked)}
+                    aria-label={tp(`${p.i18n_base}.name` as never)}
+                  />
+                  {p.enabled ? tp("enabled") : tp("disabled")}
+                </label>
+              </div>
+            ))}
           </div>
           <div className="ez-field">
             <span className="ez-field-label">{t("help")}</span>
