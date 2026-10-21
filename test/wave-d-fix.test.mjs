@@ -10,6 +10,9 @@
  *   B2 — fetch-guard IPv6: mapped/NAT64/6to4 embedded IPv4 unwrapped and
  *   range-checked in the canonical hex forms WHATWG URL produces;
  *   198.18/15 + documentation ranges rejected; byte cap streaming.
+ *   B2-R — IPv4-translated ::ffff:0:0:0/96 (re-gate round 2) plus the
+ *   full embedded-IPv4 scheme matrix: translated, compatible ::/96,
+ *   NAT64 /48 in both embeddings, Teredo client (XOR-decoded), ISATAP.
  *   Findings 3/4/6 — Omeka sync-row persistence ordering + fetch
  *   hygiene (https/loopback, timeout, byte cap); IIIF failed/duplicate
  *   canvas cleanup + skipped counting (source invariants — the import
@@ -308,6 +311,87 @@ describe('B2: fetch-guard IPv6 embedded-IPv4 bypass', () => {
     const fetchImpl = async () => new Response('hello world', { status: 200 });
     const out = await guardedFetchBytes('https://iiif.example.org/x', { fetchImpl, maxBytes: 100 });
     assert.equal(out.bytes.toString('utf8'), 'hello world');
+  });
+});
+
+// ------------------------------------------------------- B2-R (re-gate round 2)
+
+describe('B2-R: IPv4-translated ::ffff:0:0:0/96 + embedded-IPv4 scheme matrix', () => {
+  it('rejects IPv4-translated ::ffff:0:0:0/96 in every QA spelling (B2-R blockers)', () => {
+    for (const bad of [
+      'https://[::ffff:0:7f00:1]/x', // 127.0.0.1, canonical hex
+      'https://[::ffff:0:a9fe:a9fe]/x', // 169.254.169.254 (cloud metadata)
+      'https://[::ffff:0:127.0.0.1]/x', // dotted tail
+      'https://[::ffff:0:169.254.169.254]/x', // dotted tail
+      'https://[::FFFF:0:7F00:1]/x', // mixed case
+      'https://[::ffff:0000:7f00:0001]/x', // leading-zero groups
+      'https://[0:0:0:0:ffff:0:7f00:1]/x', // uncompressed
+      'https://[::ffff:0:a00:1]/x', // 10.0.0.1
+      'https://[::ffff:0:c0a8:101]/x', // 192.168.1.1
+    ]) {
+      assert.throws(() => assertPublicHttpsUrl(bad), SsrfError, bad);
+    }
+    assert.equal(isPrivateIpv6('::ffff:0:127.0.0.1'), true);
+    assert.equal(isPrivateIpv6('::ffff:0:7f00:1'), true);
+  });
+
+  it('control: public IPv4-translated ::ffff:0:808:808 (8.8.8.8) stays allowed', () => {
+    assertPublicHttpsUrl('https://[::ffff:0:808:808]/x');
+    assertPublicHttpsUrl('https://[::ffff:0:8.8.8.8]/x');
+    assert.equal(isPrivateIpv6('::ffff:0:808:808'), false);
+  });
+
+  it('scheme matrix — one private + one public probe per embedded-IPv4 scheme', () => {
+    const matrix = [
+      // [scheme, private-spelling (reject), public-spelling (allow)]
+      ['IPv4-mapped ::ffff:0:0/96', 'https://[::ffff:7f00:1]/x', 'https://[::ffff:808:808]/x'],
+      ['IPv4-translated ::ffff:0:0:0/96', 'https://[::ffff:0:7f00:1]/x', 'https://[::ffff:0:808:808]/x'],
+      ['IPv4-compatible ::/96', 'https://[::7f00:1]/x', null], // no public member: ::/96 is the whole deprecated block
+      ['NAT64 well-known 64:ff9b::/96', 'https://[64:ff9b::7f00:1]/x', 'https://[64:ff9b::808:808]/x'],
+      ['NAT64 local 64:ff9b:1::/48 contiguous', 'https://[64:ff9b:1:a9fe:a9fe::]/x', 'https://[64:ff9b:1:808:808::]/x'],
+      ['NAT64 local /48 RFC 6052 u-octet split', 'https://[64:ff9b:1:c633:0064:0000::]/x', 'https://[64:ff9b:1:0808:0008:0800::]/x'],
+      ['6to4 2002::/16', 'https://[2002:7f00:1::]/x', 'https://[2002:808:808::]/x'],
+      ['Teredo 2001::/32 server', 'https://[2001:0:7f00:1::]/x', 'https://[2001:0:808:808::]/x'],
+      ['Teredo client (XOR-obfuscated)', 'https://[2001:0:808:808:0:0:80ff:fffe]/x', 'https://[2001:0:808:808:0:0:f7f7:f7f7]/x'],
+      ['ISATAP IID 0000:5efe:<IPv4>', 'https://[2606:4700:4700::5efe:7f00:1]/x', 'https://[2606:4700:4700::5efe:808:808]/x'],
+    ];
+    for (const [scheme, bad, good] of matrix) {
+      assert.throws(() => assertPublicHttpsUrl(bad), SsrfError, `${scheme}: ${bad} must be rejected`);
+      if (good) assertPublicHttpsUrl(good); // throws if the public member is rejected
+    }
+  });
+
+  it('IPv4-compatible ::/96 is dead via the leading-zeros branch (named lock)', () => {
+    // Why it dies: expanded groups [0,0,0,0,0,0,hi,lo] hit the g5===0
+    // branch, which runs the embedded IPv4 through the full range
+    // checks; ::1 dies the same way (embedded 0.0.0.1, "this network").
+    assert.throws(() => assertPublicHttpsUrl('https://[0:0:0:0:0:0:7f00:1]/x'), SsrfError);
+    assert.throws(() => assertPublicHttpsUrl('https://[::7f00:1]/x'), SsrfError);
+    assert.throws(() => assertPublicHttpsUrl('https://[::127.0.0.1]/x'), SsrfError);
+    assert.equal(isPrivateIpv6('0:0:0:0:0:0:7f00:1'), true);
+  });
+
+  it('Teredo client address is XOR-decoded before checking (raw bits are meaningless)', () => {
+    // 127.0.0.1 XOR ffffffff = 80ff:fffe — a raw-bits check would miss it.
+    assert.equal(isPrivateIpv6('2001:0:808:808:0:0:80ff:fffe'), true);
+    // 8.8.8.8 XOR ffffffff = f7f7:f7f7 — raw bits sit in reserved 240/4,
+    // so a raw-bits check would false-flag this public client.
+    assert.equal(isPrivateIpv6('2001:0:808:808:0:0:f7f7:f7f7'), false);
+    // QA control: zero client field carries no client target.
+    assert.equal(isPrivateIpv6('2001:0:808:808::'), false);
+  });
+
+  it('ISATAP: embedded IPv4 in the IID is checked on any prefix', () => {
+    assert.equal(isPrivateIpv6('2606:4700:4700:0:0:5efe:7f00:1'), true);
+    assert.equal(isPrivateIpv6('2606:4700:4700::5efe:a9fe:a9fe'), true);
+    assert.equal(isPrivateIpv6('2606:4700:4700::5efe:127.0.0.1'), true);
+    assert.equal(isPrivateIpv6('2606:4700:4700::5efe:808:808'), false);
+  });
+
+  it('NAT64 /48: both the contiguous and u-octet-split embeddings are checked', () => {
+    assert.equal(isPrivateIpv6('64:ff9b:1:a9fe:a9fe::'), true); // contiguous 169.254.169.254
+    assert.equal(isPrivateIpv6('64:ff9b:1:c633:0064:0000::'), true); // split 198.51.100.0 (documentation)
+    assert.equal(isPrivateIpv6('64:ff9b:1:0808:0008:0800::'), false); // split 8.8.8.8, public
   });
 });
 

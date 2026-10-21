@@ -360,10 +360,26 @@ Types: `StorageCompressRequest`, `StorageCompressResponse`,
   local hostnames rejected; redirects re-validated per hop; byte
   caps enforced WHILE streaming — the read aborts past the cap).
   IPv6 literals are expanded before range checks, and embedded-IPv4
-  forms are unwrapped and checked as IPv4: IPv4-mapped
-  `::ffff:0:0/96` (dotted AND canonical hex tails), NAT64
-  `64:ff9b::/96` + local `64:ff9b:1::/48`, 6to4 `2002::/16`, Teredo
-  `2001::/32`; `198.18.0.0/15` (benchmarking) and the documentation
+  forms are unwrapped and checked as IPv4. Scheme audit (fix B2-R,
+  re-gate round 2 — every IPv6 transition/translation scheme that
+  embeds an IPv4 in the low 32 bits): IPv4-mapped `::ffff:0:0/96`
+  (dotted AND canonical hex tails — a dotted tail expands to the same
+  groups, so the marker-group check fires either way);
+  IPv4-translated `::ffff:0:0:0/96` (RFC 6052/7915 SIIT — the 0xffff
+  marker sits one group earlier than mapped); deprecated
+  IPv4-compatible `::/96` (dies via the same leading-zeros branch —
+  embedded address range-checked; also covers `::1`); NAT64
+  `64:ff9b::/96` + local `64:ff9b:1::/48` (BOTH the contiguous and the
+  RFC 6052 u-octet-split /48 embeddings checked); 6to4 `2002::/16`
+  (site IPv4 in groups 1–2); Teredo `2001::/32` (server IPv4 stored
+  plain and checked; the client IPv4 in the interface identifier is
+  XOR-obfuscated per RFC 4380 and is decoded before checking — an
+  all-zero client field carries no client target); ISATAP (interface
+  identifier `0000:5efe:<IPv4>` on ANY prefix). NOT unwrapped, by
+  construction: NAT64 under operator-chosen prefixes and 6rd use
+  prefixes indistinguishable from native global unicast, so no
+  literal-level check can identify them (same class as the DNS limit
+  below). `198.18.0.0/15` (benchmarking) and the documentation
   ranges (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`,
   `2001:db8::/32`) are rejected; unparseable IPv6 literals are
   refused. NOTE: the brief named `lib/link-policy.ts` as the existing

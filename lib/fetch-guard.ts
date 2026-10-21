@@ -14,15 +14,21 @@
  * Pure module (no server-only): the validator is unit-tested directly and
  * guardedFetch takes an injectable fetch implementation.
  *
- * IP-literal coverage (Wave D fix B2): IPv6 literals are EXPANDED to
- * their 8 groups before range checks, so the canonical hex forms WHATWG
- * URL parsing produces are what get checked — `[::ffff:127.0.0.1]`
- * canonicalizes to `[::ffff:7f00:1]`, and a dotted-tail-only check never
- * fires on it. Embedded-IPv4 forms are unwrapped and the embedded
- * address is run through the full IPv4 range checks: IPv4-mapped
- * ::ffff:0:0/96, NAT64 64:ff9b::/96 (well-known) and 64:ff9b:1::/48
- * (local-use), 6to4 2002::/16, and Teredo 2001::/32 (server address).
- * An IPv6 literal that cannot be parsed is refused (fail closed).
+ * IP-literal coverage (Wave D fix B2 + B2-R round 2): IPv6 literals are
+ * EXPANDED to their 8 groups before range checks, so the canonical hex
+ * forms WHATWG URL parsing produces are what get checked —
+ * `[::ffff:127.0.0.1]` canonicalizes to `[::ffff:7f00:1]`, and a
+ * dotted-tail-only check never fires on it. Embedded-IPv4 forms are
+ * unwrapped and the embedded address is run through the full IPv4 range
+ * checks: IPv4-mapped ::ffff:0:0/96, IPv4-translated ::ffff:0:0:0/96
+ * (RFC 6052/7915 SIIT), the deprecated IPv4-compatible ::/96, NAT64
+ * 64:ff9b::/96 (well-known) and 64:ff9b:1::/48 (local-use, both the
+ * contiguous and the RFC 6052 u-octet-split embeddings), 6to4
+ * 2002::/16, Teredo 2001::/32 (server IPv4 stored plain; the client
+ * IPv4 in the interface identifier is XOR-obfuscated and is decoded
+ * before checking), and ISATAP (interface identifier 0000:5efe:<IPv4>
+ * on any prefix). An IPv6 literal that cannot be parsed is refused
+ * (fail closed).
  *
  * Known limit (documented, not hidden): the check is on the URL's literal
  * hostname — IP literals are range-checked and well-known local names are
@@ -118,7 +124,8 @@ function embeddedIpv4Private(hi: number, lo: number): boolean {
 /**
  * True for private / loopback / link-local IPv6 literals (brackets
  * stripped), INCLUDING addresses that embed a private IPv4 address
- * (mapped / NAT64 / 6to4 / Teredo forms, dotted or canonical hex).
+ * (mapped / translated / compatible / NAT64 / 6to4 / Teredo / ISATAP
+ * forms, dotted or canonical hex).
  * Unparseable literals fail closed (true).
  */
 export function isPrivateIpv6(host: string): boolean {
@@ -131,16 +138,49 @@ export function isPrivateIpv6(host: string): boolean {
   if ((g0 & 0xff00) === 0xff00) return true; // ff00::/8 multicast
   if (g0 === 0x2001 && g1 === 0x0db8) return true; // 2001:db8::/32 documentation
   // Embedded-IPv4 forms: unwrap and apply the full IPv4 range checks.
-  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0) {
-    if (g5 === 0xffff) return embeddedIpv4Private(g6, g7); // ::ffff:0:0/96 IPv4-mapped
-    if (g5 === 0) return embeddedIpv4Private(g6, g7); // ::/96 IPv4-compatible (covers ::1)
+  // The ::-rooted families share the first four groups; the position of
+  // the 0xffff marker (group 5 vs group 4) distinguishes mapped from
+  // translated — both embed the IPv4 in the last 32 bits. A dotted tail
+  // reaches the same expanded groups: expandIpv6 rewrites it to its two
+  // hex groups first, and WHATWG URL parsing canonicalizes it likewise,
+  // so the g5/g4 marker checks below fire for dotted spellings too.
+  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0) {
+    if (g4 === 0 && g5 === 0xffff) return embeddedIpv4Private(g6, g7); // ::ffff:0:0/96 IPv4-mapped
+    if (g4 === 0xffff && g5 === 0) return embeddedIpv4Private(g6, g7); // ::ffff:0:0:0/96 IPv4-translated (SIIT)
+    if (g4 === 0 && g5 === 0) return embeddedIpv4Private(g6, g7); // ::/96 IPv4-compatible (covers ::1)
   }
   if (g0 === 0x0064 && g1 === 0xff9b) {
     if (g2 === 0 && g3 === 0) return embeddedIpv4Private(g6, g7); // 64:ff9b::/96 NAT64 well-known
-    if (g2 === 0x0001) return embeddedIpv4Private(g3, g4); // 64:ff9b:1::/48 local NAT64 (RFC 6052 /48 embedding)
+    if (g2 === 0x0001) {
+      // 64:ff9b:1::/48 local NAT64. RFC 6052 splits the embedded IPv4
+      // around the reserved "u" octet (bits 64–71): octets are
+      // [g3 hi, g3 lo, g4 lo, g5 hi]. The contiguous reading
+      // [g3, g4] is what other stacks emit, so check BOTH decodings —
+      // a private target under either reading is rejected.
+      return (
+        embeddedIpv4Private(g3, g4) ||
+        ipv4OctetsPrivate([g3 >> 8, g3 & 0xff, g4 & 0xff, g5 >> 8])
+      );
+    }
   }
-  if (g0 === 0x2002) return embeddedIpv4Private(g1, g2); // 2002::/16 6to4
-  if (g0 === 0x2001 && g1 === 0x0000) return embeddedIpv4Private(g2, g3); // 2001::/32 Teredo server IPv4
+  if (g0 === 0x2002) return embeddedIpv4Private(g1, g2); // 2002::/16 6to4 (site IPv4, stored plain)
+  if (g0 === 0x2001 && g1 === 0x0000) {
+    // 2001::/32 Teredo. The server IPv4 (g2, g3) is stored plain. The
+    // client IPv4 in the interface identifier (g6, g7) is XOR-obfuscated
+    // with all-ones (RFC 4380): it must be DECODED before range-checking
+    // — checking the raw bits would both miss private clients (127.0.0.1
+    // obfuscates to 80ff:fffe) and false-flag public ones (8.8.8.8
+    // obfuscates to f7f7:f7f7, raw-reserved 240/4). An all-zero client
+    // field carries no client target (it would decode to the broadcast
+    // address), so it is not checked.
+    if (embeddedIpv4Private(g2, g3)) return true;
+    if (g6 !== 0 || g7 !== 0) return embeddedIpv4Private(g6 ^ 0xffff, g7 ^ 0xffff);
+    return false;
+  }
+  // ISATAP (RFC 5214): the interface identifier 0000:5efe:<IPv4> marks
+  // an embedded IPv4 on ANY prefix, so this is checked after every
+  // prefix-specific family above has had its say.
+  if (g4 === 0x0000 && g5 === 0x5efe) return embeddedIpv4Private(g6, g7);
   return false;
 }
 
