@@ -113,6 +113,16 @@ function SingleItemInspector({ projectId, itemId }: { projectId: string; itemId:
       ctx.toast(err instanceof Error ? err.message : t("copyFailed"), "error");
     }
   }
+
+  // Wave D (row 25): push this item to the configured Omeka S instance.
+  async function pushToOmeka() {
+    try {
+      const res = await post<{ remote_id: number }>(`/api/projects/${projectId}/omeka/push`, { item_id: itemId });
+      ctx.toast(t("pushOmekaDone", { id: res.remote_id }));
+    } catch (err) {
+      ctx.toast(err instanceof Error ? err.message : t("pushOmekaFailed"), "error");
+    }
+  }
   const photo = useMemo(() => {
     if (photos.length === 0) return null;
     return photos.find((p) => p.id === activePhotoId) ?? photos[0];
@@ -185,6 +195,15 @@ function SingleItemInspector({ projectId, itemId }: { projectId: string; itemId:
             title={t("copyToProject")}
           >
             <CopyIcon size={15} />
+          </button>
+          <button
+            type="button"
+            className="ez-btn ez-btn--sm"
+            onClick={pushToOmeka}
+            aria-label={t("pushOmeka")}
+            title={t("pushOmeka")}
+          >
+            Omeka
           </button>
           <button
             type="button"

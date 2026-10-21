@@ -75,7 +75,7 @@ interface QueueFile {
   error?: string;
 }
 
-type Tab = "files" | "folder" | "jsonld";
+type Tab = "files" | "folder" | "jsonld" | "iiif";
 
 let localSeq = 0;
 const newLocalId = () => `q-${++localSeq}-${Date.now()}`;
@@ -115,6 +115,10 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
   const [batchDensity, setBatchDensity] = useState("");
   const [groupPages, setGroupPages] = useState(true);
   const [jobId, setJobId] = useState<string | null>(null);
+  // Wave D (row 26): IIIF manifest import — server-side fetch + harvest.
+  const [iiifUrl, setIiifUrl] = useState("");
+  const [iiifBusy, setIiifBusy] = useState(false);
+  const [iiifResult, setIiifResult] = useState("");
   // Folder uploads: the dir → { list_id } mapping minted by folder-session
   // (called in run(), after hashing — the server needs per-file sha256).
   // Shown as a "N folder lists created" note once the run starts.
@@ -552,6 +556,26 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
     }
   }
 
+  async function importIiif() {
+    const url = iiifUrl.trim();
+    if (!url || iiifBusy) return;
+    setIiifBusy(true);
+    setIiifResult("");
+    try {
+      const res = await post<{ imported: number; failed: number; manifest_label: string }>("/api/projects/" + projectId + "/import/iiif", {
+        manifest_url: url,
+      });
+      setIiifResult(t("iiifDone", { imported: res.imported, failed: res.failed, list: res.manifest_label }));
+      pushToast({ message: t("iiifDone", { imported: res.imported, failed: res.failed, list: res.manifest_label }), kind: res.failed > 0 ? "error" : undefined });
+      void refreshAndBroadcast(ctx, ["items", "lists", "meter"]);
+      void mutate((k) => typeof k === "string" && k.includes(`/api/projects/${projectId}`));
+    } catch (err) {
+      pushToast({ message: err instanceof Error ? err.message : t("iiifFailed"), kind: "error" });
+    } finally {
+      setIiifBusy(false);
+    }
+  }
+
   async function importJsonLd(file: File) {
     const text = await file.text();
     let data: unknown;
@@ -589,7 +613,7 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
       wide
     >
       <div className="ez-tabs" role="tablist" aria-label={t("title")} style={{ marginTop: 0 }} data-tour="import-tabs">
-        {(["files", "folder", "jsonld"] as Tab[]).map((id) => (
+        {(["files", "folder", "jsonld", "iiif"] as Tab[]).map((id) => (
           <button
             key={id}
             type="button"
@@ -641,6 +665,29 @@ export default function ImportDialog({ projectId }: { projectId: string }) {
             {t("pickFolder")}
           </button>
           <p className="ez-notice">{t("folderNote")}</p>
+        </div>
+      ) : null}
+      {tab === "iiif" ? (
+        <div style={{ margin: "12px 0" }}>
+          <label style={{ fontSize: 12, display: "block", marginBottom: 4 }} htmlFor="ez-iiif-url">
+            {t("iiifUrlLabel")}
+          </label>
+          <input
+            id="ez-iiif-url"
+            className="ez-input"
+            style={{ width: "100%" }}
+            value={iiifUrl}
+            onChange={(e) => setIiifUrl(e.target.value)}
+            placeholder="https://example.org/iiif/manifest.json"
+            inputMode="url"
+          />
+          <div style={{ marginTop: 8 }}>
+            <button type="button" className="ez-btn" disabled={iiifBusy || !iiifUrl.trim()} onClick={importIiif}>
+              {iiifBusy ? t("iiifImporting") : t("iiifImport")}
+            </button>
+          </div>
+          <p className="ez-notice">{t("iiifNote")}</p>
+          {iiifResult ? <p style={{ fontSize: 12 }}>{iiifResult}</p> : null}
         </div>
       ) : null}
       {tab === "jsonld" && !(job && running) ? (
