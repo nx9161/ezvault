@@ -100,6 +100,7 @@ export default function TopBar({ projectId }: { projectId: string }) {
   const setRetentionOpen = useUiStore((s) => s.setRetentionOpen);
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const setTemplatesOpen = useUiStore((s) => s.setTemplatesOpen);
+  const setCsvImportOpen = useUiStore((s) => s.setCsvImportOpen);
   const { data: project } = useProject(projectId);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const router = useRouter();
@@ -188,6 +189,7 @@ export default function TopBar({ projectId }: { projectId: string }) {
             </MenuItem>
             <MenuSeparator />
             <MenuItem onSelect={() => setTpyOpen(true)}>{t("importTpy")}</MenuItem>
+            <MenuItem onSelect={() => setCsvImportOpen(true)}>{t("importCsv")}</MenuItem>
             <MenuItem onSelect={() => setTemplatesOpen(true)}>
               {t("templateManager")}
             </MenuItem>
@@ -198,6 +200,20 @@ export default function TopBar({ projectId }: { projectId: string }) {
               }}
             >
               {t("exportJsonLd")}
+            </MenuItem>
+            <MenuItem
+              onSelect={() => {
+                window.location.href = `/api/projects/${projectId}/export/csv`;
+              }}
+            >
+              {t("exportCsv")}
+            </MenuItem>
+            <MenuItem
+              onSelect={() => {
+                window.location.href = `/api/projects/${projectId}/export/zip`;
+              }}
+            >
+              {t("exportZip")}
             </MenuItem>
             <MenuSeparator />
             <MenuItem onSelect={() => startTour()}>{ts("takeTour")}</MenuItem>

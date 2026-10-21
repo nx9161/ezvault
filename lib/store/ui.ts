@@ -82,6 +82,7 @@ interface UiState {
   aboutOpen: boolean;
   settingsOpen: boolean;
   templatesOpen: boolean;
+  csvImportOpen: boolean;
   mobileNav: "library" | "lists" | "tags" | "search" | "more";
   sidebarOpen: boolean; // tablet drawer
   inspectorOpen: boolean; // tablet drawer
@@ -92,6 +93,7 @@ interface UiState {
   setAboutOpen: (b: boolean) => void;
   setSettingsOpen: (b: boolean) => void;
   setTemplatesOpen: (b: boolean) => void;
+  setCsvImportOpen: (b: boolean) => void;
   setMobileNav: (n: UiState["mobileNav"]) => void;
   setSidebarOpen: (b: boolean) => void;
   setInspectorOpen: (b: boolean) => void;
@@ -216,6 +218,7 @@ export const useUiStore = create<UiState>()(
         aboutOpen: false,
         settingsOpen: false,
         templatesOpen: false,
+        csvImportOpen: false,
         mobileNav: "library",
         sidebarOpen: false,
         inspectorOpen: false,
@@ -226,6 +229,7 @@ export const useUiStore = create<UiState>()(
         setAboutOpen: (aboutOpen) => set({ aboutOpen }),
         setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
         setTemplatesOpen: (templatesOpen) => set({ templatesOpen }),
+        setCsvImportOpen: (csvImportOpen) => set({ csvImportOpen }),
         setMobileNav: (mobileNav) => set({ mobileNav }),
         setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
         setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),

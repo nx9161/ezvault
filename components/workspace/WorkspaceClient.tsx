@@ -29,6 +29,7 @@ import TpyWizard from "@/components/tpy/TpyWizard";
 import StorageDialog from "@/components/meter/StorageDialog";
 import SettingsDialog from "@/components/settings/SettingsDialog";
 import TemplatesDialog from "@/components/templates/TemplatesDialog";
+import CsvImportDialog from "@/components/importer/CsvImportDialog";
 import { useOpContext } from "@/components/sidebar/Sidebar";
 
 // S-4: accessible splitter — separator role with valuenow/min/max from the
@@ -296,6 +297,7 @@ export default function WorkspaceClient({ projectId }: { projectId: string }) {
       <StorageDialog projectId={projectId} />
       <SettingsDialog projectId={projectId} />
       <TemplatesDialog projectId={projectId} />
+      <CsvImportDialog projectId={projectId} />
       <ShortcutsOverlay />
       <Toasts />
     </div>
