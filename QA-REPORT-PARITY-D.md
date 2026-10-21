@@ -9,6 +9,12 @@ the wave is solid: all headline numbers reproduce exactly.
 > B1 is behaviorally dead; B2's round-1 forms are dead, but a sibling
 > embedded-IPv4 prefix (IPv4-translated `::ffff:0:0:0/96`) survives QA's
 > novel probes. All gates green, bundle unchanged.
+>
+> **RE-GATE (round 3, fix round 2) appended as §10 below — SIGN-OFF.**
+> B2-R and all three exhaustiveness branches (Teredo client decode,
+> NAT64 /48 dual embedding, ISATAP on any prefix) verified behaviorally,
+> including QA novel shapes and false-positive lookalikes. All gates
+> green. Wave D is signed off.
 
 - Baseline: `main` @ `8d2719b` (Wave D commits `da26958`…`8d2719b`).
 - QA method: full-tree reads of every Wave D lib + route, gate re-runs,
@@ -499,3 +505,125 @@ one canonical family untested), in a much smaller blast radius.
 
 **Sign-off withheld until B2-R is fixed and re-probed. Everything else
 in the fix round is signed off as verified.**
+
+---
+
+## 10. RE-GATE (round 3 — fix round 2 verification) — **SIGN-OFF**
+
+**Verdict: SIGN-OFF.** B2-R is dead in every spelling, and the three
+branches added under the exhaustiveness order (Teredo client-field XOR
+decode, NAT64 local /48 dual embedding, ISATAP on any prefix) all
+behave as specified under direct behavioral probes — including QA
+novel shapes and false-positive lookalikes (no public address was
+falsely rejected). B1's spot re-check passes (code untouched in round
+2; live probe still 403). All gates reproduce. Wave D is signed off.
+
+- Baseline: `main` @ `8da150c` (fix round 2 = the single commit
+  `8da150c` on top of the §9 report commit `8fd471e`; it touches only
+  `CONTRACT.md`, `lib/fetch-guard.ts`, `test/wave-d-fix.test.mjs`).
+- QA method: direct `tsx` probes of `assertPublicHttpsUrl` (33 cases),
+  `git diff` over the fix range, live production-server probe for B1,
+  full gate re-runs. `.env.local` protocol followed for the build
+  (parked, build run, restored immediately, verified 1097 B).
+
+### 10.1 B2-R + the three new branches — all probes behave as specified
+
+**B2-R — IPv4-translated `::ffff:0:0:0/96` (the §9.3 blocker table):**
+all 7 strings now **REJECTED** — `::ffff:0:7f00:1`,
+`::ffff:0:a9fe:a9fe`, dotted `::ffff:0:127.0.0.1`, dotted
+`::ffff:0:169.254.169.254`, mixed-case `::FFFF:0:7F00:1`,
+leading-zero `::ffff:0000:7f00:0001`, uncompressed
+`0:0:0:0:ffff:0:7f00:1`. Control `::ffff:0:808:808` (8.8.8.8)
+**allowed**, as required.
+
+**Teredo client field (server 8.8.8.8 public):** client-private
+`2001:0:808:808::80ff:fffe` (127.0.0.1 XOR-obfuscated) **rejected**;
+client-public `2001:0:808:808::f7f7:f7f7` (8.8.8.8 obfuscated)
+**allowed** — the XOR decode fires in both directions, so public
+clients are not false-flagged by their raw reserved-looking bits;
+all-zero client field **allowed** (both `2001:0:808:808::` and with
+nonzero flags/port groups).
+
+**NAT64 local /48 (`64:ff9b:1::/48`), u-octet-split embedding:**
+`64:ff9b:1:c633:64::` **rejected** — its split reading is
+198.51.100.0 while its contiguous reading (198.51.0.100) is public,
+so only the split check can have caught it; `64:ff9b:1:a9fe:a9:fe00::`
+(169.254.169.254 split) **rejected**; split-form public
+`64:ff9b:1:808:8:800::` (8.8.8.8) **allowed**; contiguous /48 metadata
+`64:ff9b:1:a9fe:a9fe::` still **rejected**.
+
+**ISATAP on a non-2001 prefix:** `2606:4700:4700::5efe:7f00:1`
+**rejected**; ISATAP public `2606:4700:4700::5efe:808:808` **allowed**.
+
+### 10.2 QA novel shapes (8, all as expected)
+
+- **Translated + exotic dotted tails:** `[::ffff:0:0177.0.0.1]` and
+  `[::ffff:0:0x7f.0.0.1]` **rejected** — at the URL-parse layer
+  (WHATWG `new URL` refuses those spellings inside brackets, so the
+  guard throws "not parseable" before range checks; fail-closed
+  either way, recorded for accuracy).
+- **ISATAP marker split across the `::` boundary:** `2606:4700::5efe:7f00:1`
+  and `1:2:3:4::5efe:a9fe:a9fe` **rejected** — expansion lands the
+  marker at g5 in both.
+- **Teredo, public server, reserved client targets after XOR decode:**
+  client 0.1.2.3 (`::fffe:fdfc`, 0/8), client 240.0.0.1 (`::fff:fffe`,
+  240/4), client 100.64.0.1 (`::9bbf:fffe`, CGNAT) all **rejected**.
+- **False-positive lookalikes — all ALLOWED (correct):**
+  `::ffff:1:808:808` (g4 = ffff but g5 nonzero — not the /96
+  translated scheme, must not unwrap); `2606:4700:4700:0:1:5efe:808:808`
+  (5efe at g5 but g4 nonzero — not an ISATAP IID);
+  `2001:1:808:808::80ff:fffe` (not the Teredo /32 prefix);
+  `64:ff9b:2::a9fe:a9fe` (operator-chosen NAT64 prefix — the
+  documented not-literal-checkable class in CONTRACT, not a scheme
+  the guard claims to unwrap). Sanity: `example.com` and
+  `2606:4700:4700::1111` allowed.
+
+**Observation (non-blocking, recorded):** dual-reading strings whose
+IID is ISATAP-shaped but whose prefix belongs to an earlier family
+with a public operative embedding — `2001:0:808:808:0:5efe:7f00:1`
+(Teredo prefix; operative client decodes to public 128.255.255.254)
+and `2002:808:808::5efe:7f00:1` (6to4, public site IPv4) — are
+allowed, because the prefix-specific branch returns before the
+ISATAP check. QA accepts this: the prefix determines the tunnel
+semantics (a literal connection to a 2001::/32 address is a Teredo
+connection, not an ISATAP one), and the code comment documents the
+sequencing ("checked after every prefix-specific family above has
+had its say"). Noted so the decision is on the record, not silent.
+
+### 10.3 B1 spot re-check — PASS
+
+`git diff 8fd471e..8da150c -- proxy.ts lib/token-guard.ts` is
+**empty** (round 2 touched neither file). Live probe against QA's
+own production build of `8da150c`: `POST /api/admin/delete-everything`
+with an `ezv_` bearer → **403** with the proxy guard body
+(`"API tokens are restricted to the documented developer-API
+subset…"`); the no-bearer control reached the handler layer (400),
+confirming the 403 is the token guard, not a blanket failure.
+
+### 10.4 Gates — PASS (all reproduced)
+
+| Gate | Expected | QA result |
+|---|---|---|
+| `npm test` | 213 | **213 pass / 0 fail** — reproduced |
+| `npx tsc --noEmit` | clean | exit 0, no output |
+| `npm run build` | green | exit 0 (`.env.local` parked/restored, 1097 B) |
+| First Load JS `/[projectId]` | 215.03 KB | **215.03 KB gzip (11 files, 0 missing; raw 731.59 KB)** — canonical method, QA's own build; delta vs round 1 = **+0.00 KB** |
+| `node scripts/check-licences.mjs` | PASS | OK — only the four pre-existing LGPL warnings |
+| Zero new dependencies | yes | `git diff 8fd471e..8da150c -- package.json package-lock.json` **empty**; coordinator files (`neon.ts`, `hello.ts`, `.agents/`, `skills-lock.json`) untouched |
+
+### 10.5 Builder claims audit (fix round 2)
+
+Reproduced exactly: the translated branch, Teredo XOR client decode
+(private rejected / public allowed / all-zero allowed), NAT64 /48
+dual embedding (split-only catch proven by a string whose contiguous
+reading is public), ISATAP on any prefix, 213/213 tests, tsc clean,
+build green, bundle 215.03 KB (+0.00), zero new deps, CONTRACT's
+operator-prefix/6rd honesty note present and accurate. No
+overstatements found in this round; QA's novel shapes found no
+surviving private embedding and no false rejection.
+
+**Wave D (Omeka S push, IIIF import, Developer API) is SIGNED OFF.**
+Remaining open items are the pre-existing non-blocking notes from
+§3/§4 (Omeka `http://` loopback warning UX, IIIF item-row semantics
+— both already documented in CONTRACT) and the §10.2 dual-reading
+observation; none gates this wave.
