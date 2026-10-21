@@ -120,8 +120,19 @@ export async function getProject(projectId: string): Promise<Record<string, unkn
 }
 
 /**
- * Atomically increment storage_counters (SELECT ... FOR UPDATE lock order:
- * counters row first). Counters row is created lazily if missing.
+ * Atomically increment storage_counters. The counters row is created
+ * lazily if missing; the increment applies on top of any existing row.
+ *
+ * MUST stay a SINGLE statement: every query this app sends goes through
+ * the Neon HTTP driver as a prepared statement, and Postgres rejects
+ * multi-command prepared statements ("cannot insert multiple commands
+ * into a prepared statement"). The previous two-statement form
+ * (INSERT ... ON CONFLICT DO NOTHING; WITH locked AS (... FOR UPDATE)
+ * UPDATE ...) crashed every transaction batch that included it —
+ * /api/import/process died on it 2026-10-21, wedging the owner's import.
+ * The upsert form preserves the semantics: one atomic statement, and
+ * ON CONFLICT DO UPDATE takes the counters-row lock, keeping the
+ * counters-first lock order inside tx() batches.
  */
 export function bumpCountersQuery(
   projectId: string,
@@ -129,18 +140,13 @@ export function bumpCountersQuery(
 ): TxQuery {
   return {
     text: `
-      INSERT INTO storage_counters (project_id, bytes_originals, bytes_thumbs, bytes_exports)
-      VALUES ($1, 0, 0, 0)
-      ON CONFLICT (project_id) DO NOTHING;
-      WITH locked AS (
-        SELECT * FROM storage_counters WHERE project_id = $1 FOR UPDATE
-      )
-      UPDATE storage_counters c
-      SET bytes_originals = c.bytes_originals + $2,
-          bytes_thumbs    = c.bytes_thumbs + $3,
-          bytes_exports   = c.bytes_exports + $4,
-          updated_at = now()
-      WHERE c.project_id = $1`,
+      INSERT INTO storage_counters (project_id, bytes_originals, bytes_thumbs, bytes_exports, updated_at)
+      VALUES ($1, $2, $3, $4, now())
+      ON CONFLICT (project_id) DO UPDATE SET
+        bytes_originals = storage_counters.bytes_originals + EXCLUDED.bytes_originals,
+        bytes_thumbs    = storage_counters.bytes_thumbs + EXCLUDED.bytes_thumbs,
+        bytes_exports   = storage_counters.bytes_exports + EXCLUDED.bytes_exports,
+        updated_at = now()`,
     params: [
       projectId,
       delta.originals ?? 0,
