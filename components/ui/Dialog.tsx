@@ -25,6 +25,17 @@ export function Dialog({ title, onClose, children, footer, wide }: DialogProps) 
   const scrimRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<Element | null>(null);
+  // Parents almost always pass an inline onClose arrow, so its identity
+  // changes on EVERY parent re-render (e.g. each keystroke in a form).
+  // The trap effect must not key on it: hold the latest callback in a
+  // ref and run the trap once on mount. Keying the effect on [onClose]
+  // refired cleanup (focus back to the trigger) + setup (focus to the
+  // first focusable — the close button) on every keystroke, which stole
+  // focus from inputs and dismissed the iOS keyboard per character.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     triggerRef.current = document.activeElement;
@@ -35,16 +46,29 @@ export function Dialog({ title, onClose, children, footer, wide }: DialogProps) 
       Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
         (el) => el.offsetParent !== null,
       );
-    // Focus the dialog itself first (or the first focusable).
-    const first = focusables()[0];
+    // Initial focus: an explicit [autofocus] element wins (React's
+    // autoFocus lands before this effect — keep it if focus is already
+    // inside the dialog), then the first text field, then the first
+    // focusable (previously always the close button, ahead of inputs in
+    // DOM order), else the dialog itself.
+    const items = focusables();
     (dialog.tabIndex = -1);
-    if (first) first.focus();
+    const auto = dialog.querySelector<HTMLElement>("[autofocus]");
+    const active = document.activeElement as HTMLElement | null;
+    const field = items.find((el) =>
+      ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName),
+    );
+    if (auto) auto.focus();
+    else if (active && active !== document.body && dialog.contains(active)) {
+      /* React autoFocus already placed focus inside — keep it. */
+    } else if (field) field.focus();
+    else if (items[0]) items[0].focus();
     else dialog.focus();
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab") return;
@@ -68,7 +92,10 @@ export function Dialog({ title, onClose, children, footer, wide }: DialogProps) 
       const trigger = triggerRef.current as HTMLElement | null;
       if (trigger && typeof trigger.focus === "function") trigger.focus();
     };
-  }, [onClose]);
+    // Mount-once by design (see onCloseRef above): re-running this trap
+    // on parent re-renders steals focus from dialog inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div

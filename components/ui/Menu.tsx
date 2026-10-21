@@ -22,6 +22,14 @@ export function Menu({ anchor, onClose, children, label }: MenuProps) {
   const ref = useRef<HTMLDivElement>(null);
   // D-M12: capture the trigger so focus returns on close (Dialog pattern).
   const triggerRef = useRef<Element | null>(null);
+  // Same hazard as Dialog: parents pass inline onClose arrows whose
+  // identity changes per render. Hold the latest in a ref so the setup
+  // effect keys only on the anchor; otherwise every parent re-render
+  // refires cleanup (focus to trigger) + setup (focus to first item).
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     triggerRef.current = document.activeElement;
@@ -41,7 +49,7 @@ export function Menu({ anchor, onClose, children, label }: MenuProps) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -55,7 +63,7 @@ export function Menu({ anchor, onClose, children, label }: MenuProps) {
       next?.focus();
     };
     const onDown = (e: PointerEvent) => {
-      if (!el.contains(e.target as Node)) onClose();
+      if (!el.contains(e.target as Node)) onCloseRef.current();
     };
     document.addEventListener("keydown", onKey, true);
     document.addEventListener("pointerdown", onDown);
@@ -65,7 +73,9 @@ export function Menu({ anchor, onClose, children, label }: MenuProps) {
       const trigger = triggerRef.current as HTMLElement | null;
       if (trigger && typeof trigger.focus === "function") trigger.focus();
     };
-  }, [anchor, onClose]);
+    // Anchor changes reposition; onClose identity must not (see ref note).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchor]);
 
   return (
     <div
