@@ -22,6 +22,13 @@ import {
 } from "@/lib/commands/ops";
 import { post } from "@/lib/api/client";
 import { mutate } from "swr";
+import {
+  makeClipboard,
+  writeItemClipboard,
+  readItemClipboard,
+  planPaste,
+  executePaste,
+} from "@/lib/items/clipboard";
 
 export interface HotkeyContext {
   projectId: string;
@@ -236,6 +243,57 @@ export const HOTKEY_REGISTRY: HotkeyEntry[] = [
         "trash",
         "meter",
       ]);
+    },
+  },
+  {
+    id: "copySelection",
+    keys: "mod+shift+c",
+    scope: "global",
+    group: "organize",
+    labelKey: "copySelection",
+    hint: "Ctrl/⌘ Shift C",
+    // Row 32 fix: stores the selection's item refs in the app clipboard
+    // (lib/items/clipboard); paste executes the copy in the target
+    // project. Toast wording mirrors center.copyStored in en.json.
+    run: ({ projectId, ctx }) => {
+      const clip = makeClipboard(projectId, useUiStore.getState().selectedIds);
+      if (!clip) return;
+      writeItemClipboard(clip);
+      ctx.toast(
+        `${clip.itemIds.length} item(s) copied — open a project and choose “Paste items” to copy them there.`,
+      );
+    },
+  },
+  {
+    id: "pasteItems",
+    keys: "mod+shift+v",
+    scope: "global",
+    group: "organize",
+    labelKey: "pasteItems",
+    hint: "Ctrl/⌘ Shift V",
+    // Row 32 fix: executes the bulk copy for every clipboard ref into
+    // THIS project; the toast reports honest copied/failed counts.
+    // Wording mirrors center.paste* in en.json.
+    run: async ({ projectId, ctx }) => {
+      const plan = planPaste(readItemClipboard(), projectId);
+      if (!plan) return;
+      const summary = await executePaste(plan, post);
+      const reasons = summary.failed.map((f) => f.reason).join("; ");
+      if (summary.failed.length === 0) {
+        ctx.toast(`Pasted ${summary.copied} item(s) into this project.`);
+      } else if (summary.copied > 0) {
+        ctx.toast(
+          `Pasted ${summary.copied} item(s); ${summary.failed.length} failed: ${reasons}`,
+          "error",
+        );
+      } else {
+        ctx.toast(`Paste failed: ${reasons}`, "error");
+      }
+      if (summary.copied > 0) {
+        await mutate(
+          (kk) => typeof kk === "string" && kk.includes(`/api/projects/${projectId}`),
+        );
+      }
     },
   },
   {

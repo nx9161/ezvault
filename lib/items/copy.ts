@@ -19,14 +19,28 @@ import 'server-only';
  *     missing.
  *   - lists: NOT copied — list trees are project-local organization; the
  *     copy lands unfiled in the target project (CONTRACT.md, row 32).
- *   - transcriptions: keyed to images in a wave-C table with no v1 data;
- *     not copied.
+ *   - transcriptions: COPIED (row 32 fix, 2026-10-21). Every non-deleted
+ *     transcription row of each source image is re-inserted against the
+ *     NEW image id (text/config/status/angle/mirror/words/page geometry
+ *     verbatim), and a stored ALTO object is copied to the new row's
+ *     fresh key — delete-independent, with the same rollback as the
+ *     photo originals. The 0010 search trigger fires on insert, so the
+ *     copy is searchable in the target project immediately.
  */
 
 import { randomUUID } from 'node:crypto';
 import { sql, tx, bumpRevQuery, bumpCountersQuery, type TxQuery } from '@/lib/db/index';
 import { HttpError } from '@/lib/api/route-utils';
 import { getStorageDriver, keys, extForMimetype } from '@/lib/storage/driver';
+import {
+  planTranscriptionCopies,
+  copyTranscriptionObjects,
+  rollbackCopiedObjects,
+  transcriptionInsertParams,
+  runBulkCopy,
+  type SourceTranscriptionRow,
+  type BulkCopyFailure,
+} from './copy-plan';
 
 const qq = (text: string, params?: unknown[]): TxQuery => ({ text, params });
 
@@ -36,6 +50,7 @@ export interface CopyResult {
   photos_copied: number;
   selections_copied: number;
   notes_copied: number;
+  transcriptions_copied: number;
   rev: number;
 }
 
@@ -111,6 +126,15 @@ export async function copyItemToProject(
     WHERE tg.subject_id = ANY(${subjectIds})`;
   const noteRows = await sql()`SELECT subject_id, text, state, language FROM notes
     WHERE subject_id = ANY(${subjectIds}) AND deleted_at IS NULL ORDER BY created_at`;
+  // Transcriptions hang off images (0010): every non-deleted row of each
+  // source image rides along to the NEW image (row 32 fix).
+  const sourceImageIds = photoRows.map((r) => r['image_id'] as string);
+  const transcriptionRows = sourceImageIds.length
+    ? await sql()`SELECT id, image_id, text, alto_r2_key, config, status, angle, mirror,
+        words, page_width, page_height
+      FROM transcriptions WHERE image_id = ANY(${sourceImageIds}) AND deleted_at IS NULL
+      ORDER BY created_at`
+    : [];
 
   // ---- id plan -----------------------------------------------------------
   const newItemId = randomUUID();
@@ -122,6 +146,12 @@ export async function copyItemToProject(
   }
   const selIdMap = new Map<string, string>();
   for (const r of selRows) selIdMap.set(r['subject_id'] as string, randomUUID());
+  const transcriptionPlan = planTranscriptionCopies(
+    transcriptionRows as unknown as SourceTranscriptionRow[],
+    imageIdMap,
+    targetProjectId,
+    randomUUID,
+  );
   const mapSubject = (old: string): string | null =>
     old === itemId ? newItemId : photoIdMap.get(old) ?? selIdMap.get(old) ?? null;
 
@@ -154,9 +184,12 @@ export async function copyItemToProject(
       }
       newPhotoKeys.set(oldPhotoId, { r2_key: newKey, thumb_r2_key: newThumbKey });
     }
+    // ALTO objects for the copied transcriptions join the SAME rollback
+    // list (copiedKeys): a failure anywhere deletes them too.
+    await copyTranscriptionObjects(transcriptionPlan, storage, copiedKeys);
   } catch (err) {
     // Roll the storage side back so a failed copy leaves no orphans.
-    await storage.deleteMany(copiedKeys).catch(() => undefined);
+    await rollbackCopiedObjects(storage, copiedKeys);
     throw err;
   }
 
@@ -244,6 +277,12 @@ export async function copyItemToProject(
     queries.push(qq(`INSERT INTO notes (id, subject_id, text, state, language) VALUES ($1,$2,$3,$4::jsonb,$5)`,
       [randomUUID(), newSubject, r['text'], JSON.stringify(r['state'] ?? {}), (r['language'] as string | null) ?? null]));
   }
+  for (const p of transcriptionPlan) {
+    queries.push(qq(`INSERT INTO transcriptions (id, image_id, text, alto_r2_key, config, status,
+        angle, mirror, words, page_width, page_height)
+      VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9::jsonb,$10,$11)`,
+      transcriptionInsertParams(p)));
+  }
   if (bytesOriginals || bytesThumbs) {
     queries.push(bumpCountersQuery(targetProjectId, { originals: bytesOriginals, thumbs: bytesThumbs }));
   }
@@ -252,7 +291,7 @@ export async function copyItemToProject(
   try {
     await tx(() => queries);
   } catch (err) {
-    await storage.deleteMany(copiedKeys).catch(() => undefined);
+    await rollbackCopiedObjects(storage, copiedKeys);
     throw err;
   }
 
@@ -263,6 +302,36 @@ export async function copyItemToProject(
     photos_copied: photoRows.length,
     selections_copied: selRows.length,
     notes_copied: notesCopied,
+    transcriptions_copied: transcriptionPlan.length,
     rev: Number(rev[0]['rev']),
+  };
+}
+
+export interface BulkCopyResult {
+  target_project_id: string;
+  copied: (CopyResult & { source_item_id: string })[];
+  failed: BulkCopyFailure[];
+}
+
+/**
+ * Copy a SET of items into another project in one call (row 32 fix).
+ * Each item is an independent deep copy (copyItemToProject): one item's
+ * failure is recorded with its reason and never stops or rolls back the
+ * others — the result carries honest copied/failed lists.
+ */
+export async function copyItemsToProject(
+  projectId: string,
+  itemIds: string[],
+  targetProjectId: string,
+): Promise<BulkCopyResult> {
+  const target = await sql()`SELECT id FROM projects WHERE id = ${targetProjectId}`;
+  if (!target.length) throw new HttpError(404, 'not_found', 'target project not found');
+  const outcome = await runBulkCopy(itemIds, (itemId) =>
+    copyItemToProject(projectId, itemId, targetProjectId),
+  );
+  return {
+    target_project_id: targetProjectId,
+    copied: outcome.copied.map((c) => ({ source_item_id: c.source_item_id, ...c.result })),
+    failed: outcome.failed,
   };
 }

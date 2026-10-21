@@ -74,7 +74,16 @@ describe('copy-to-project wiring (row 32)', () => {
   });
 
   it('rolls back copied objects when a later step fails', () => {
-    assert.match(copy, /storage\.deleteMany\(copiedKeys\)/);
+    // Row 32 fix: rollback goes through copy-plan's rollbackCopiedObjects
+    // (shared list now includes copied transcription ALTO objects).
+    assert.match(copy, /rollbackCopiedObjects\(storage, copiedKeys\)/);
+    const plan = read('lib/items/copy-plan.ts');
+    assert.match(plan, /storage\.deleteMany\(\[\.\.\.copiedKeys\]\)/);
+  });
+
+  it('copies transcriptions to the new images (row 32 fix)', () => {
+    assert.match(copy, /planTranscriptionCopies\(/);
+    assert.match(copy, /INSERT INTO transcriptions/);
   });
 
   it('bumps the TARGET project counters and rev', () => {
