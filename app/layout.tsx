@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import type { Metadata, Viewport } from "next";
 import { NextIntlClientProvider } from "next-intl";
-import { getMessages, getTranslations } from "next-intl/server";
+import { getLocale, getMessages, getTranslations } from "next-intl/server";
 import PwaProvider from "@/components/pwa/PwaProvider";
 import "./globals.css";
 
@@ -36,11 +36,12 @@ export const viewport: Viewport = {
 const THEME_BOOTSTRAP = `(function(){try{var raw=localStorage.getItem('ezvault-ui');var theme=raw&&JSON.parse(raw).state&&JSON.parse(raw).state.theme;if(theme!=='dark'&&theme!=='light'){theme=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',theme);}catch(e){document.documentElement.setAttribute('data-theme','light');}})();`;
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const locale = await getLocale();
   const messages = await getMessages();
   const t = await getTranslations("app");
 
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={locale} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
       </head>
@@ -54,7 +55,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         <a className="skip-link" href="#ez-inspector">
           {t("skipToInspector")}
         </a>
-        <NextIntlClientProvider messages={messages} locale="en">
+        <NextIntlClientProvider messages={messages} locale={locale}>
           <PwaProvider>{children}</PwaProvider>
         </NextIntlClientProvider>
       </body>

@@ -207,6 +207,7 @@ input[type="range"].ez-range { accent-color: var(--accent); width: 100%; }
   border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; background: var(--surface-2);
 }
 .ez-topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.ez-lang-select { width: auto; max-width: 150px; padding: 5px 8px; font-size: 12px; }
 .ez-segmented { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
 .ez-segmented button {
   border: 0; background: var(--surface); color: var(--ink-2);

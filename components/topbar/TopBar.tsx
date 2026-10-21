@@ -11,6 +11,7 @@ import { useUiStore } from "@/lib/store/ui";
 import { useMeter, useProject } from "@/lib/api/hooks";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "@/components/ui/Menu";
 import { startTour } from "@/lib/tour/launcher";
+import LocaleSwitcher from "@/components/topbar/LocaleSwitcher";
 import { GridIcon, TableIcon, ThemeIcon, ChevronDownIcon } from "@/components/ui/icons";
 
 import { VaultMark } from "@/components/ui/icons";
@@ -144,6 +145,7 @@ export default function TopBar({ projectId }: { projectId: string }) {
           </button>
         </div>
         <MeterChip projectId={projectId} onOpen={() => setRetentionOpen(true)} />
+        <LocaleSwitcher />
         <button
           type="button"
           className="ez-icon-btn"
