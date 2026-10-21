@@ -5,6 +5,11 @@
 both verified against the tree and by running probes. Everything else in
 the wave is solid: all headline numbers reproduce exactly.
 
+> **RE-GATE (round 2) appended as §9 below — verdict remains BLOCK.**
+> B1 is behaviorally dead; B2's round-1 forms are dead, but a sibling
+> embedded-IPv4 prefix (IPv4-translated `::ffff:0:0:0/96`) survives QA's
+> novel probes. All gates green, bundle unchanged.
+
 - Baseline: `main` @ `8d2719b` (Wave D commits `da26958`…`8d2719b`).
 - QA method: full-tree reads of every Wave D lib + route, gate re-runs,
   and adversarial probes executed against `lib/fetch-guard.ts` via `tsx`.
@@ -307,3 +312,190 @@ IP-literal coverage (B2) — in both cases the unit tests assert the
 IPv4 rejections) and never probe the negative space QA probed here.
 
 **Sign-off withheld until B1 and B2 are fixed and re-verified.**
+
+---
+
+## 9. RE-GATE (round 2) — **BLOCK**
+
+**Verdict: BLOCK (round 2).** B1 is fixed — behaviorally dead under live
+probes, including novel path/header/method attacks QA added. The four
+non-blocking findings are fixed. All gates reproduce. **B2 is NOT fully
+dead:** every round-1 form is now rejected, but QA's novel probes found a
+sibling embedded-IPv4 prefix the fix does not unwrap — the
+IPv4-translated prefix `::ffff:0:0:0/96` — which embeds the same private
+targets (loopback, cloud metadata) and is **allowed** in every spelling.
+Per the round-1 standard (a genuine embedded-IPv4 bypass is a blocker,
+not a note — that is exactly why NAT64 counted in B2), sign-off is
+withheld on this one surviving family. The fix is small and surgical:
+one more embedded-prefix branch in `isPrivateIpv6`, mirroring the
+mapped/NAT64 handling, plus regression tests.
+
+- Baseline: `main` @ `ec36be0` (fix commits `72cef80`…`ec36be0` on top
+  of round-1 report commit `0cede28`).
+- QA method: live production server (`next start`, QA's own build) +
+  direct `tsx` function probes of `lib/token-guard.ts`,
+  `lib/fetch-guard.ts`, `lib/omeka/client.ts`; independent route-tree
+  recount; full gate re-runs. `.env.local` protocol followed for the
+  build (parked, build run, restored immediately, verified 1097 B).
+
+### 9.1 Gates — PASS (all reproduced)
+
+| Gate | Builder claim | QA re-gate result |
+|---|---|---|
+| `npm test` | 206 | **206 pass / 0 fail, 50 suites** — reproduced |
+| `npx tsc --noEmit` | clean | exit 0, no output |
+| `npm run build` | green | exit 0 (`.env.local` parked/restored, 1097 B) |
+| `node scripts/check-licences.mjs` | PASS | OK — only the four pre-existing LGPL warnings |
+| `node scripts/verify-codecs.mjs` | OK | OK (libvips 8.18.7, sharp 0.35.5) |
+| Zero new dependencies | yes | `git diff 0cede28..ec36be0 -- package.json package-lock.json` **empty**; diff touches 9 files, none of them coordinator-owned (`neon.ts`, `hello.ts`, `.agents/`, `skills-lock.json` untouched) |
+| First Load JS `/[projectId]` | 215.03 KB, +0.00 | **215.03 KB gzip (11 files, 0 missing; raw 731.59 KB)** — canonical method (`/tmp/measure-first-load.cjs`: rootMainFiles + non-async client-reference chunks, per-file gzip), measured on QA's own build. Delta vs Wave D round 1 = **+0.00 KB**, within the 40 KB rule |
+
+### 9.2 B1 global token guard — **FIXED, behaviorally dead**
+
+Code: `lib/token-guard.ts` (`TOKEN_SUBSET`, 12 method-aware pairs) run
+by `proxy.ts` before CSRF/rate-limit/handlers on every `/api/**`
+request presenting an `ezv_`-prefixed bearer.
+
+Live probes against QA's production build (proxy denial is the JSON
+body `{"error":{"code":"forbidden","message":"API tokens are
+restricted to the documented developer-API subset…"}}`):
+
+| Probe | Result |
+|---|---|
+| token + `POST /api/admin/delete-everything` | **403 proxy** |
+| token + `DELETE` / `PATCH /api/projects/p1` | **403 proxy** |
+| token + `GET …/export/zip`, `…/export/csv`, `…/export/jsonld` | **403 proxy** (all three) |
+| token + `POST …/trash/empty` | **403 proxy** |
+| token + `POST /api/projects`, `POST /api/api-tokens` | **403 proxy** |
+| token + wrong method on subset paths (`DELETE …/notes/n1`, `PUT …/omeka/settings`) | **403 proxy** |
+| token + subset routes (`GET /api/projects`, `GET /api/projects/p1`, `POST …/photos/ph1/notes`, `PATCH …/notes/n1`) | **pass the guard** — handler layer executes (500 from the handler's token-auth DB lookup; the live DB has no `api_tokens` relation — migration 0011 not applied there — and the server log shows the `lib/token-auth` chunk running; never the proxy 403) |
+| no bearer + `GET /api/projects` | **200**, unaffected |
+| cron-style bearer + `GET /api/cron/nightly` | passes the guard — handler's own 401 "bad cron secret" (not a proxy 403) |
+
+Guard self-attacks (QA-added, live unless noted):
+
+- **Header/scheme case:** `AUTHORIZATION:` and `aUtHoRiZaTiOn:` header
+  names, `bEaReR` scheme, tab after `Bearer` — all still **403** on
+  delete-everything. (Unit: multi-space and padded values also deny;
+  lowercase method `get` on a subset path denies — fail closed.)
+- **Trailing slash / double slash:** Next normalizes these with a 308
+  to the canonical path *before* routing. Following the redirects with
+  the token re-presented (`curl -L`): `…/export/zip/`,
+  `…/export//zip`, `//api/…/export/zip`, `POST
+  /api/admin/delete-everything/`, `POST //api/admin/delete-everything`
+  all land on the canonical path and get the **proxy 403**.
+  Subset-equivalents (`/api/projects/`, `/api//projects`) land only on
+  the subset handler.
+- **URL-encoded segments:** `/%61pi/…/export/zip` and `/API/…` → Next
+  **404** (no route — proven identical without a token);
+  `/api/projects/p1/%65xport/zip`, `…/export%2fzip`,
+  `/api/projects/%2e%2e/export/zip` → **proxy 403**.
+- **Route-walk test not gamed (spot-checked independently):** 79 route
+  files; QA's own recount finds 101 `export const` methods + 11
+  re-exported (`export { GET, POST }` style, which the walk does
+  handle). Five files checked by hand — `projects/[id]` (GET subset;
+  PATCH/DELETE denied), `export/zip` (GET denied),
+  `trash/empty` (POST denied), `items/[itemId]` (GET subset;
+  PATCH/DELETE denied), `photos/[photoId]/notes` (`export { GET, POST }`,
+  both subset) — all match the walk's claims. The walk also asserts no
+  phantom subset entries.
+
+### 9.3 B2 fetch-guard — **round-1 forms dead; ONE sibling prefix survives (BLOCKER B2-R)**
+
+Direct probes of `assertPublicHttpsUrl` (via `tsx`), required list —
+**all rejected**: `::ffff:7f00:1`, `::ffff:a9fe:a9fe`, `::ffff:0a00:1`,
+`::ffff:127.0.0.1` (dotted), `64:ff9b::a9fe:a9fe`, `64:ff9b:1::a9fe:a9fe`
+(tail form), `64:ff9b:1:a9fe:a9fe::` (/48-embedded form),
+`2002:7f00:1::`, Teredo server forms `2001:0:7f00:1::` and
+`2001:0:a9fe:a9fe::`, `198.18.1.1`, documentation ranges
+(`192.0.2.1`, `198.51.100.1`, `203.0.113.1`, `2001:db8::1`).
+**All allowed (correct):** `::ffff:808:808`, `64:ff9b::808:808`,
+`2002:808:808::`, `2001:0:808:808::` (Teredo, public server),
+`https://example.com`.
+
+QA novel shapes that are **dead**: mixed-case hex (`::FFFF:7F00:1`),
+leading-zero groups (`::ffff:7f00:0001`), uncompressed mapped form
+(`0:0:0:0:0:ffff:7f00:1`), uncompressed IPv4-compatible loopback
+(`0:0:0:0:0:0:7f00:1`).
+
+**B2-R — BLOCKER (surviving): IPv4-translated `::ffff:0:0:0/96`.**
+`isPrivateIpv6` unwraps the mapped prefix (`g5 === 0xffff`, first six
+groups `0,0,0,0,0,ffff`) but not the translated prefix (RFC 6052/7915
+SIIT; first six groups `0,0,0,0,ffff,0`, written `::ffff:0:<IPv4>`).
+Every spelling is **ALLOWED** by QA's probes:
+
+| URL | Result |
+|---|---|
+| `https://[::ffff:0:7f00:1]/x` (= 127.0.0.1) | **ALLOWED** |
+| `https://[::ffff:0:a9fe:a9fe]/x` (= 169.254.169.254) | **ALLOWED** |
+| `https://[::ffff:0:127.0.0.1]/x` (dotted) | **ALLOWED** |
+| `https://[::ffff:0:169.254.169.254]/x` (dotted) | **ALLOWED** |
+| `https://[::FFFF:0:7F00:1]/x` (mixed case) | **ALLOWED** |
+| `https://[::ffff:0000:7f00:0001]/x` (leading zeros) | **ALLOWED** |
+| `https://[0:0:0:0:ffff:0:7f00:1]/x` (uncompressed) | **ALLOWED** |
+
+(Control: the public translated form `::ffff:0:808:808` is allowed —
+correctly, *if* the private members of the family are rejected, exactly
+as with mapped/NAT64/6to4/Teredo.) This is the same class round 1
+blocked on: a well-known translation prefix embedding a private IPv4
+target that the guard's own CONTRACT section claims is range-checked
+("embedded-IPv4 forms are unwrapped and checked as IPv4"). The
+translated prefix is absent from that list in both code and CONTRACT —
+an omission, not a documented limit (the documented limit is DNS
+rebinding of *names*, which this is not).
+
+**Required fix:** in `isPrivateIpv6`, when the expanded groups are
+`[0,0,0,0,0xffff,0,hi,lo]`, run `embeddedIpv4Private(hi, lo)` — one
+branch beside the mapped check — and add regression tests for the
+table above (hex, dotted, mixed-case, uncompressed) with
+`::ffff:0:808:808` staying allowed. Re-gate then only needs this
+family re-probed plus the suite.
+
+**Streaming cap — fixed, reproduced:** QA's harness (25-byte cap,
+10-byte chunks) aborts after **4 pulls** with `SsrfError` (builder
+claimed ≤6) — the reader cancels early rather than buffering the body.
+
+### 9.4 Non-blocking findings 3–6 — **all FIXED**
+
+3. **Omeka sync persistence:** `lib/omeka/service.ts` — code read +
+   builder test ordering assertions confirm `recordSync(…, 'ok')` runs
+   immediately after create/update, *before* the media-attach loop; a
+   media failure re-records the row as `last_status='warning'` with
+   the error and the photo stays out of `media_map`, so a re-push
+   takes the update path and retries instead of duplicating.
+4. **IIIF cleanup / counting:** `lib/iiif/import.ts` — `cleanupItem()`
+   (subject DELETE, cascading) runs on both the duplicate branch and
+   the catch branch once the item transaction has committed;
+   duplicates increment `skipped` (never `imported`); CONTRACT now
+   states the count semantics and the response shape includes
+   `skipped`.
+5. **CONTRACT constant-time wording:** now accurate — live
+   verification is described as the DB hash lookup
+   (`WHERE token_hash = hash(presented)`), the constant-time helper
+   explicitly *not* the live path. The `omeka_error` wording was also
+   corrected (code on the single-push route; per-item project results
+   carry status + excerpt as message text).
+6. **Omeka fetch hygiene:** constants `OMEKA_REQUEST_TIMEOUT_MS =
+   30_000` and `OMEKA_RESPONSE_MAX_BYTES = 10 MiB` in
+   `lib/omeka/client.ts`, enforced via AbortController + the
+   fetch-guard's `readBodyCapped`. Base-URL rule probed directly:
+   `normalizeOmekaBaseUrl` throws for non-loopback `http://` (name,
+   private IP, IPv6 literal, and `[::ffff:127.0.0.1]`), allows
+   loopback `http://` (`localhost`, `127.0.0.0/8`, `[::1]`), and is
+   enforced at **save** (`saveOmekaSettings`) and at **load** (the
+   `OmekaClient` constructor in `loadClient`'s path throws for a
+   stored non-loopback `http://` URL — QA-verified by construction
+   probe).
+
+### 9.5 Builder claims audit (fix round)
+
+Reproduced exactly: 206/206 tests (50 suites), tsc clean, build green,
+licence PASS, zero new deps, coordinator files untouched, First Load
+JS 215.03 KB (+0.00), streaming cap (4 pulls vs claimed ≤6), all B1
+claims, and every B2 claim *the builder made*. The one miss is a form
+the builder never listed: the IPv4-translated prefix (B2-R above) —
+the same pattern as round 1 (coverage asserted over the forms tested,
+one canonical family untested), in a much smaller blast radius.
+
+**Sign-off withheld until B2-R is fixed and re-probed. Everything else
+in the fix round is signed off as verified.**
