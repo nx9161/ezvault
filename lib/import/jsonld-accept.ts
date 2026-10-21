@@ -23,7 +23,8 @@ import { sanitizeNoteHtml, sanitizeTiptapDoc, isAllowedLinkUrl } from '../notes/
 import { tiptapToText } from '../export/jsonld.js';
 import { HttpError } from '../api/route-utils';
 
-import { strictDocumentLoader, TROPY_CONTEXT_URL } from './jsonld-context';
+import { strictDocumentLoader, TROPY_CONTEXT_URL, RemoteContextRejectedError } from './jsonld-context';
+import { expandAndCompact } from './jsonld-expand';
 import { isAllowedUploadMimetype } from './validation';
 
 export { strictDocumentLoader, TROPY_CONTEXT_URL };
@@ -233,14 +234,13 @@ export async function acceptJsonLd(
   doc: unknown,
   opts: JsonLdAcceptOptions = {},
 ): Promise<JsonLdAcceptResult> {
-  const { default: jsonld } = await import('jsonld');
-  const { RemoteContextRejectedError } = await import('./jsonld-context');
-  // B10: expansion with the strict documentLoader (no remote contexts).
-  let expanded: JsonLdNode[];
+  // B10: expansion with the strict documentLoader (no remote contexts),
+  // then re-compaction to the compact vocabulary shape the walk below is
+  // written against (see lib/import/jsonld-expand.ts — walking the raw
+  // expanded form silently dropped tags/lists/notes/photos/selections).
+  let nodes: JsonLdNode[];
   try {
-    expanded = (await jsonld.expand(doc as never, {
-      documentLoader: strictDocumentLoader,
-    } as never)) as JsonLdNode[];
+    nodes = await expandAndCompact(doc);
   } catch (err) {
     if (err instanceof RemoteContextRejectedError) {
       throw new HttpError(422, 'remote_context_rejected', err.message);
@@ -250,7 +250,7 @@ export async function acceptJsonLd(
 
   const jobId = randomUUID();
   await sql()`INSERT INTO import_jobs (id, project_id, kind, status, total)
-    VALUES (${jobId}, ${projectId}, 'jsonld', 'running', ${expanded.length})`;
+    VALUES (${jobId}, ${projectId}, 'jsonld', 'running', ${nodes.length})`;
 
   // Template cache: uri -> id.
   const tplCache = new Map<string, string>();
@@ -349,7 +349,7 @@ export async function acceptJsonLd(
   const KNOWN_ITEM_KEYS = new Set(['@id', '@type', 'template', 'tag', 'list', 'photo', 'note']);
   const KNOWN_PHOTO_KEYS = new Set(['@id', '@type', 'protocol', 'filename', 'path', 'mimetype', 'size', 'checksum', 'density', 'width', 'height', 'page', 'template', 'tag', 'note', 'selection']);
 
-  for (const node of expanded) {
+  for (const node of nodes) {
     const types = asArray<string>(node['@type']);
     const isItem = types.some((t) => /Item$/.test(t)) || node['photo'] !== undefined;
     if (!isItem) continue;
