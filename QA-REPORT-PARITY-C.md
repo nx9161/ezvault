@@ -5,7 +5,7 @@
 **Date:** 2026-10-21. **Verdict: SIGN-OFF** (no blockers; two non-blocking observations, §10).
 
 ## 1. Gates — PASS
-- `npm test`: **147/147 pass, 0 fail, 0 cancelled/skipped/todo** (43 suites, run live by QA). DB-gated tests print their skip line when `DATABASE_URL` is unset (standard pattern; see §6 caveat).
+- `npm test`: **147/147 pass, 0 fail, 0 cancelled/skipped/todo** (37 suites, run live by QA). DB-gated tests print their skip line when `DATABASE_URL` is unset (standard pattern; see §6 caveat).
 - `npx tsc --noEmit`: exit 0, clean.
 - `npm run build`: exit 0, run by QA under the working-tree protocol — `.env.local` moved to `/tmp/ezvault-env.local` before the build (prebuild secret-scan), restored immediately after, verified back at **1097 bytes**. Build route table includes all five new transcription routes.
 - `node scripts/check-licences.mjs`: **PASS** — no GPL/AGPL/SSPL; exactly the **4 pre-existing LGPL warnings** (`@img/sharp-libvips-linux-x64`, `@img/sharp-libvips-linuxmusl-x64`, `@img/sharp-wasm32`, `libheif-js`), unchanged from baseline.
