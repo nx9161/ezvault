@@ -93,11 +93,17 @@ type SelCtx = { params: Promise<{ id: string; selectionId: string }> };
 export function photoNotesRoute() {
   return {
     GET: handle(async (req: Request, ctx: PhotoCtx) => {
+      // Wave D (row 36): tokens honored — GET needs 'read'.
+      const { enforceTokenScope } = await import('@/lib/token-auth');
+      await enforceTokenScope(req, 'read');
       const { id, photoId } = await ctx.params;
       await requireProject(id);
       return listNotes(id, photoId, new URL(req.url));
     }),
     POST: handle(async (req: Request, ctx: PhotoCtx) => {
+      // Wave D (row 36): tokens honored — note creation needs 'notes:write'.
+      const { enforceTokenScope } = await import('@/lib/token-auth');
+      await enforceTokenScope(req, 'notes:write');
       const { id, photoId } = await ctx.params;
       await requireProject(id);
       return createNote(id, photoId, req);
@@ -108,11 +114,17 @@ export function photoNotesRoute() {
 export function selectionNotesRoute() {
   return {
     GET: handle(async (req: Request, ctx: SelCtx) => {
+      // Wave D (row 36): tokens honored — GET needs 'read'.
+      const { enforceTokenScope } = await import('@/lib/token-auth');
+      await enforceTokenScope(req, 'read');
       const { id, selectionId } = await ctx.params;
       await requireProject(id);
       return listNotes(id, selectionId, new URL(req.url));
     }),
     POST: handle(async (req: Request, ctx: SelCtx) => {
+      // Wave D (row 36): tokens honored — note creation needs 'notes:write'.
+      const { enforceTokenScope } = await import('@/lib/token-auth');
+      await enforceTokenScope(req, 'notes:write');
       const { id, selectionId } = await ctx.params;
       await requireProject(id);
       return createNote(id, selectionId, req);

@@ -9,7 +9,10 @@ export const maxDuration = 300;
 
 type Ctx = { params: Promise<{ id: string; photoId: string }> };
 
-export const GET = handle(async (_req: Request, ctx: Ctx) => {
+export const GET = handle(async (req: Request, ctx: Ctx) => {
+  // Wave D (row 36): developer API tokens honored on this route ('read').
+  const { enforceTokenScope } = await import('@/lib/token-auth');
+  await enforceTokenScope(req, 'read');
   const { id, photoId } = await ctx.params;
   await requireProject(id);
   return ok(await getPhotoJson(id, photoId));

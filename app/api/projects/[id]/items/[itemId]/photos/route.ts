@@ -12,6 +12,9 @@ export const maxDuration = 300;
 type Ctx = { params: Promise<{ id: string; itemId: string }> };
 
 export const GET = handle(async (req: Request, ctx: Ctx) => {
+  // Wave D (row 36): developer API tokens honored on this route ('read').
+  const { enforceTokenScope } = await import('@/lib/token-auth');
+  await enforceTokenScope(req, 'read');
   const { id, itemId } = await ctx.params;
   await requireProject(id);
   const chk = await sql()`SELECT id FROM subjects WHERE id = ${itemId} AND project_id = ${id} AND kind = 'item'`;

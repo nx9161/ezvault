@@ -8,6 +8,9 @@ export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 export const GET = handle(async (req: Request) => {
+  // Wave D (row 36): developer API tokens honored on this route ('read').
+  const { enforceTokenScope } = await import('@/lib/token-auth');
+  await enforceTokenScope(req, 'read');
   const url = new URL(req.url);
   const { limit, offset } = pagination(url);
   const rows = await sql()`SELECT * FROM projects ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`;

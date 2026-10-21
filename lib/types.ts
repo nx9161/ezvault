@@ -382,6 +382,84 @@ export interface ImportAltoRequest {
 }
 
 // ---------------------------------------------------------------------------
+// Wave D — Omeka S push (row 25), IIIF import (row 26), API tokens (row 36)
+// ---------------------------------------------------------------------------
+
+/** Omeka settings as the API exposes them — the credential NEVER appears. */
+export interface OmekaSettingsView {
+  configured: boolean;
+  status: 'ok' | 'not_configured';
+  base_url: string | null;
+  key_identity: string | null;
+  has_credential: boolean;
+  master_key_configured: boolean;
+}
+
+export interface SaveOmekaSettingsRequest {
+  base_url: string;
+  key_identity: string;
+  /** Omit / empty to keep the stored credential. Stored AES-256-GCM only. */
+  key_credential?: string;
+}
+
+export interface OmekaPushItemResponse extends MutationMeta {
+  item_id: UUID;
+  remote_id: number;
+  remote_url: string | null;
+  action: 'created' | 'updated';
+  media_attached: number;
+  warnings: string[];
+}
+
+export interface IiifImportRequest {
+  manifest_url: string;
+  template_id?: UUID | null;
+}
+
+export interface IiifImportResponse {
+  job_id: UUID;
+  list_id: UUID;
+  manifest_label: string;
+  version: 2 | 3;
+  imported: number;
+  failed: number;
+  results: Array<{
+    canvas_id: string;
+    title: string;
+    status: 'imported' | 'duplicate' | 'failed';
+    item_id?: UUID;
+    error?: string;
+  }>;
+}
+
+export type ApiScope = 'read' | 'notes:write';
+
+/** Token row as listed — hash and secret NEVER appear. */
+export interface ApiTokenView {
+  id: UUID;
+  name: string;
+  prefix: string;
+  scopes: ApiScope[];
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface CreateApiTokenRequest {
+  name: string;
+  scopes: ApiScope[];
+  /** ISO timestamp; null/absent = never expires. */
+  expires_at?: string | null;
+}
+
+export interface CreateApiTokenResponse {
+  token: ApiTokenView;
+  /** Plaintext secret — shown ONCE at creation, never stored or re-readable. */
+  secret: string;
+}
+
+// ---------------------------------------------------------------------------
 // Templates & vocabularies (§2.5)
 // ---------------------------------------------------------------------------
 
@@ -788,7 +866,7 @@ export interface FolderSessionResponse extends MutationMeta {
 }
 
 export type JobStatus = 'queued' | 'running' | 'paused_cpu' | 'failed' | 'done' | 'cancelled';
-export type JobKind = 'upload' | 'folder' | 'tpy' | 'jsonld' | 'compress';
+export type JobKind = 'upload' | 'folder' | 'tpy' | 'jsonld' | 'compress' | 'csv' | 'omeka' | 'iiif';
 
 export interface ImportJob {
   id: UUID;

@@ -19,6 +19,9 @@ const SORTS: Record<string, string> = {
 };
 
 export const GET = handle(async (req: Request, ctx: Ctx) => {
+  // Wave D (row 36): developer API tokens honored on this route ('read').
+  const { enforceTokenScope } = await import('@/lib/token-auth');
+  await enforceTokenScope(req, 'read');
   const { id } = await ctx.params;
   await requireProject(id);
   const url = new URL(req.url);

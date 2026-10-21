@@ -9,7 +9,10 @@ export const maxDuration = 300;
 
 type Ctx = { params: Promise<{ id: string; noteId: string }> };
 
-export const GET = handle(async (_req: Request, ctx: Ctx) => {
+export const GET = handle(async (req: Request, ctx: Ctx) => {
+  // Wave D (row 36): developer API tokens honored on this route ('read').
+  const { enforceTokenScope } = await import('@/lib/token-auth');
+  await enforceTokenScope(req, 'read');
   const { id, noteId } = await ctx.params;
   await requireProject(id);
   const rows = await sql()`SELECT n.id, n.subject_id, n.text, n.state, n.language, n.created_at, n.updated_at
@@ -21,6 +24,9 @@ export const GET = handle(async (_req: Request, ctx: Ctx) => {
 
 /** Autosave target — PATCH with a new TipTap state (sanitized, B13). */
 export const PATCH = handle(async (req: Request, ctx: Ctx) => {
+  // Wave D (row 36): tokens honored — note update needs 'notes:write'.
+  const { enforceTokenScope } = await import('@/lib/token-auth');
+  await enforceTokenScope(req, 'notes:write');
   const { id, noteId } = await ctx.params;
   await requireProject(id);
   const body = await parseJson<{ state?: unknown; text?: string; language?: string | null }>(req);
@@ -59,7 +65,12 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
 });
 
 /** Soft-delete a note (trash semantics: deleted_at; restorable via subject restore). */
-export const DELETE = handle(async (_req: Request, ctx: Ctx) => {
+export const DELETE = handle(async (req: Request, ctx: Ctx) => {
+  // Wave D (row 36): deletion is OUTSIDE the token scopes (create/update
+  // only) — a presented token is denied rather than silently honored.
+  const { enforceTokenScope } = await import('@/lib/token-auth');
+  const token = await enforceTokenScope(req, 'notes:write');
+  if (token) throw new HttpError(403, 'forbidden', 'API tokens may not delete notes');
   const { id, noteId } = await ctx.params;
   await requireProject(id);
   const chk = await sql()`SELECT n.id, n.subject_id FROM notes n JOIN subjects s ON s.id = n.subject_id
