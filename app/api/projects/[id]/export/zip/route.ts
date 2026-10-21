@@ -60,7 +60,7 @@ export const GET = handle(async (req: Request, ctx: Ctx) => {
   const format = (project as Record<string, unknown>)['notes_export_format'] === 'markdown'
     ? 'markdown'
     : 'html';
-  const doc = await buildProjectJsonLd(sql, project, { format, itemIds: scopedIds });
+  const doc = await buildProjectJsonLd(sql(), project, { format, itemIds: scopedIds });
   const metadataBytes = new TextEncoder().encode(JSON.stringify(doc, null, 2));
 
   const files: ZipSourceFile[] = [

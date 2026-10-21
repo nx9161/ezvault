@@ -34,7 +34,7 @@ export const GET = handle(async (req: Request, ctx: Ctx) => {
 
   const { buildProjectJsonLd } = await import('@/lib/export/jsonld.js');
   const projectName = String((project as Record<string, unknown>)['name'] ?? 'project');
-  const doc = await buildProjectJsonLd(sql, project, { format, itemId });
+  const doc = await buildProjectJsonLd(sql(), project, { format, itemId });
   const body = JSON.stringify(doc, null, 2);
 
   const jobId = randomUUID();
