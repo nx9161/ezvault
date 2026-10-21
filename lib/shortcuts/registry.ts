@@ -48,6 +48,7 @@ export interface HotkeyEntry {
 function closeTopmost() {
   const ui = useUiStore.getState();
   if (ui.paletteOpen) ui.setPaletteOpen(false);
+  else if (ui.csvImportOpen) ui.setCsvImportOpen(false);
   else if (ui.shortcutsOpen) ui.setShortcutsOpen(false);
   else if (ui.importOpen) ui.setImportOpen(false);
   else if (ui.tpyOpen) ui.setTpyOpen(false);
@@ -225,8 +226,8 @@ export const HOTKEY_REGISTRY: HotkeyEntry[] = [
     group: "organize",
     labelKey: "merge",
     hint: "Ctrl/⌘ Shift M",
-    // mergeItemsOp is the wave-2 honest placeholder: it toasts that merging
-    // ships in wave 2 and changes nothing.
+    // Wave B2: mergeItemsOp runs the real backend merge (one undoable
+    // command); the first selected item is the survivor.
     run: async ({ ctx }) => {
       const ids = useUiStore.getState().selectedIds;
       if (ids.length < 2) return;
@@ -235,6 +236,34 @@ export const HOTKEY_REGISTRY: HotkeyEntry[] = [
         "trash",
         "meter",
       ]);
+    },
+  },
+  {
+    id: "print",
+    keys: "mod+p",
+    scope: "global",
+    group: "general",
+    labelKey: "print",
+    hint: "Ctrl/⌘ P",
+    // Row 28/29: the cloud equivalent of Tropy's print dialog is the
+    // browser print of the current view, laid out by the @media print
+    // stylesheet in globals.css. When the inspector is open on one item,
+    // print targets the item document (metadata + notes); otherwise the
+    // item grid/list prints as a contact sheet. The mode rides on
+    // <body data-print> and is cleared after printing.
+    run: () => {
+      const ui = useUiStore.getState();
+      const mode = ui.inspectorOpen && ui.activeItemId ? "inspector" : "items";
+      document.body.dataset.print = mode;
+      const clear = () => {
+        delete document.body.dataset.print;
+        window.removeEventListener("afterprint", clear);
+      };
+      window.addEventListener("afterprint", clear);
+      window.print();
+      // afterprint is reliable in modern browsers; also clear on a delay
+      // for engines that skip it when the dialog is cancelled instantly.
+      window.setTimeout(clear, 1000);
     },
   },
   // ---------- viewer (docs-only; bound in PhotoViewer onViewerKeyDown) ----------

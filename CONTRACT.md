@@ -154,3 +154,69 @@ Types: `StorageCompressRequest`, `StorageCompressResponse`,
 - Conventional commits; push to `main` as features land (owner's standing order).
 - This Next.js version has breaking changes — read `node_modules/next/dist/docs/`
   before writing any code (per the scaffold's agent rules).
+
+## Wave B2 — CSV / archive export, merge, copy, print (rows 23/24/32/28 + 29 remainder)
+
+- CSV export: GET `/api/projects/[id]/export/csv` (`?itemId=` |
+  `?itemIds=a,b,c` | neither = whole project). One row per item; header =
+  `id,template` + the union of the items' template property URIs
+  (template field order, then non-template properties sorted); multi-value
+  cells join with `"; "`; every cell passes the B15 sanitizer
+  (`lib/export/csv-export.ts`). Trashed items are excluded from all B2
+  exports.
+- CSV import: POST `/api/projects/[id]/import/csv` `{ csv, template_id }`
+  → `{ job_id, imported, failed, errors: [{row, message}], item_ids, rev }`
+  (201). Headers are property URIs; `id`/`template` columns are ignored;
+  each data row becomes a NEW item under the chosen template (datatype
+  from the template field when known). Ingest unsanitizes the B15 tick
+  prefix so export→import round-trips restore original text. Runs the
+  import-job pattern (kind `csv`, migration 0009); bad rows are reported
+  and skipped, never half-imported (per-row transaction). Caps: 5000
+  rows, 200 columns, 4.5 MB body. Known limit: a single value containing
+  the two-character sequence `"; "` splits into two values on import
+  (separator ambiguity, same class as the reference CSV plugin).
+- Archive ZIP export: GET `/api/projects/[id]/export/zip` (same scope
+  params). Streamed response, never staged: `metadata.json` (the JSON-LD
+  document for the scope; notes included), `manifest.json`
+  (`ezvault-archive/1`: per-photo sha256/size + honest `missing_originals`
+  list), and one folder per item (`<title>--<id8>/`) holding each photo's
+  ORIGINAL bytes (stored, ranged-read in 4 MB chunks; `lib/export/
+  zip-stream.ts`, fflate — INTEGRATION-DECISIONS.md #8). NOT the
+  encrypted monthly backup.
+- JSON-LD builder: `buildProjectJsonLd` gains an additive `opts.itemIds`
+  selection filter (backup callers unaffected).
+- Merge: POST `/api/projects/[id]/items/merge` `{ target_id, source_ids,
+  clientOpId? }` → `{ merged_into, trashed, photos_moved, notes_moved,
+  rev }`. ONE transaction, planned by `lib/items/merge-plan.ts`. Rule
+  (binding): survivor's metadata values win; a property the survivor
+  lacks fills with ALL values from the first source (request order) that
+  has it; photos append after the survivor's (source order preserved);
+  item-notes move; tags + list memberships union; cover kept, else first
+  moved photo's image. Sources trash with reason `merge` (prior lists
+  recorded). Undo: POST `/api/projects/[id]/items/merge/undo`
+  `{ clientOpId }` applies the inverse stored in the merge's command_log
+  payload (photos/notes back, added tags/lists/metadata-links removed,
+  cover restored, sources un-trashed and re-filed). Same op id +
+  undone row = redo (merge re-runs, inverse refreshed); same op id +
+  live row = replay (no-op). mod+shift+m and the toolbar button both run
+  `mergeItemsOp`; the toolbar asks first (confirm dialog).
+- Copy to project: POST `/api/projects/[id]/items/[itemId]/copy`
+  `{ target_project_id }` → `{ item_id, target_project_id, photos_copied,
+  selections_copied, notes_copied, rev }` (201). Deep copy: new rows for
+  subjects/items/images/photos/selections/metadata values+links/
+  taggings/notes; originals + thumbnails copied via `storage.copy()` to
+  FRESH keys under the target project (delete-independence is binding —
+  no shared keys, ever); failed copies delete their copied objects.
+  Template maps by URI, else name, else is copied into the target; tags
+  map by name (created with source color when missing). Lists are NOT
+  copied (copy lands unfiled); transcriptions are not copied (wave-C
+  table, no v1 data). Target counters + rev bump in the copy transaction.
+- Print (rows 28 + 29): Ctrl/Cmd+P is registered (`print` in
+  `lib/shortcuts/registry.ts`, labelled "Print current view (browser
+  print)" in the `?` overlay). It sets `<body data-print>` — `inspector`
+  when the inspector is open on an item (item document: photo + metadata
+  + notes), else `items` (contact sheet: thumbnails + titles + key
+  metadata) — and calls `window.print()`; the layouts live in the
+  `@media print` block of `app/globals.css` (`@page` margins, chrome
+  hidden). Honest limit: the grid is virtualized, so the contact sheet
+  covers the items currently loaded in the view.
