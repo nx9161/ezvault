@@ -78,8 +78,6 @@
     "merge": "Merge items",
     "mergeBody": "Photos, notes, tags and metadata move into “{title}”. The other items are moved to trash with a merge note.",
     "mergeHint": "Ctrl/⌘ Shift M",
-    "mergeWave2": "Merge items (wave 2)",
-    "mergeWave2Hint": "Item merging ships in wave 2 — not available in v1.",
     "mergeTitle": "Merge {count, plural, one {# item} other {# items}}?",
     "moveToList": "Move to list",
     "notesBadge": "{count, plural, one {# note} other {# notes}}",
