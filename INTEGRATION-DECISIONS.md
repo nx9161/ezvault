@@ -367,3 +367,50 @@ for the three render packages in `next.config.ts` (Turbopack cannot
 place .node/.wasm assets; the traced function bundles verifiably contain
 the OpenJPEG WASM — 580 render-layer files in the import/process route
 trace).
+
+---
+
+## 8. fflate@0.8.3 — streaming ZIP writer (Wave B2, row 24)
+
+**Status:** ACCEPTED · landed 2026-10-21
+
+**Why:** the archive ZIP export needs a ZIP *writer*; the codebase only
+had a hand-rolled streaming *reader* (`lib/import/zip-extract.ts`).
+`jszip` was rejected without a trial: it is dual-licensed MIT/GPLv3 and
+buffers whole archives in memory — both wrong for this codebase (license
+bar + the streaming/CPU budgets). `fflate` is a single-purpose,
+zero-dependency library whose streaming `Zip` API (entries pushed chunk
+by chunk, data descriptors instead of up-front sizes) matches the app's
+existing ranged-read streaming pattern (`lib/export/zip-stream.ts` pulls
+originals from storage in 4 MB `getRange` chunks; media entries are
+STORED — already compressed — text entries deflated at level 6).
+SERVER-side only in practice (imported solely by
+`lib/export/zip-stream.ts`, consumed by the archive route); nothing
+reaches a client bundle.
+
+**Verification (pulled 2026-10-21):**
+
+- **Stars:** 3,062 (github.com/101arrowz/fflate, pushed 2026-05-16, not
+  archived)
+- **Version:** 0.8.3 (npm registry `latest` at install time; installed
+  `--save-exact`)
+- **License (exact):** MIT (shipped `LICENSE`; registry `license` field
+  agrees)
+- **License gate:** `node scripts/check-licences.mjs` PASS after install —
+  no GPL/AGPL/SSPL; only the four pre-existing LGPL warnings (unchanged)
+- **OSV.dev:** fflate@0.8.3 → **zero** vulnerabilities (`{}` response).
+  Note: 0.8.2 and earlier carry GHSA-px8p-9vwx-vf98 (unzipSync infinite
+  loop on crafted ZIP64) — the pin is 0.8.3, and EZVault never unzips
+  with fflate (import-side extraction stays on the hand-rolled reader).
+- **postinstall scripts:** none (only dev `test`/`build`/`prepack`
+  scripts, which do not run on install)
+- **Dependencies:** zero
+- **Round-trip proof:** `test/zip-stream.test.mjs` writes a streamed
+  archive (stored chunked media + deflated text + empty entry) and reads
+  it back byte-identical; the same layout was also validated against
+  Python's `zipfile` (independent implementation, CRC check passed)
+  during development.
+
+**Bundle delta:** **0 KB** client — server-only import chain. No ADR
+needed. (Wave B2's client-side delta is measured separately in
+CONTRACT.md.)
