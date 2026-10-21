@@ -5,6 +5,10 @@
  * rename).
  *
  * Edge duties (stateless, durable-free):
+ *   0. GLOBAL developer-token subset guard (Wave D fix B1): a presented
+ *      `ezv_` bearer on any /api route outside the documented subset
+ *      (lib/token-guard.ts) is denied 403 BEFORE anything else runs —
+ *      a scoped token can never ride the human path on an unwired route.
  *   1. CSRF: Origin/Referer allowlist check on mutating routes (POST/PUT/
  *      PATCH/DELETE) — defense-in-depth; route handlers re-check.
  *   2. Strict Content-Security-Policy with ZERO inline scripts (no
@@ -15,6 +19,7 @@
  *      lib/ratelimit.ts — which is the binding layer, B16).
  */
 import { NextResponse, type NextRequest } from 'next/server';
+import { tokenGuardDenies } from './lib/token-guard';
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -82,6 +87,25 @@ export function buildCspHeader(r2AccountId?: string | null): string {
 
 export function proxy(req: NextRequest): NextResponse {
   const { pathname } = req.nextUrl;
+
+  // B1 global token guard — runs BEFORE handlers (and before CSRF/rate
+  // layers) on every /api route: a presented EZVault developer token
+  // outside the documented subset is a 403, full stop. No-bearer human
+  // requests and non-token bearers (cron secret) pass through untouched.
+  if (
+    pathname.startsWith('/api/') &&
+    tokenGuardDenies({ method: req.method, pathname, authorization: req.headers.get('authorization') })
+  ) {
+    return NextResponse.json(
+      {
+        error: {
+          code: 'forbidden',
+          message: 'API tokens are restricted to the documented developer-API subset (DEVELOPER-API.md)',
+        },
+      },
+      { status: 403 },
+    );
+  }
 
   // CSRF on mutating routes only (GET navigations and the local-driver
   // presigned URLs must not be blocked by missing Origin headers).
