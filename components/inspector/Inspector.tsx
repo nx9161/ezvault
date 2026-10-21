@@ -10,6 +10,7 @@ import { useUiStore } from "@/lib/store/ui";
 import { usePhotos, useSelections, useItem, useProjects, thumbUrl } from "@/lib/api/hooks";
 import { editsDirty } from "@/lib/api/types";
 import { post } from "@/lib/api/client";
+import type { BulkCopyResponse } from "@/lib/items/clipboard";
 import { runCommand, trashSubjectsOp } from "@/lib/commands/ops";
 import { useOpContext } from "@/components/sidebar/Sidebar";
 import { ErrorCard, SkeletonRows } from "@/components/ui/Feedback";
@@ -106,9 +107,26 @@ function SingleItemInspector({ projectId, itemId }: { projectId: string; itemId:
   const [copyMenuAt, setCopyMenuAt] = useState<{ x: number; y: number } | null>(null);
 
   async function copyToProject(targetProjectId: string, targetName: string) {
+    // Row 32 fix: the single-item menu runs through the same bulk-capable
+    // path as selection copy/paste (POST /items/copy), with per-item
+    // failure reasons surfaced instead of a blanket failure toast.
     try {
-      await post(`/api/projects/${projectId}/items/${itemId}/copy`, { target_project_id: targetProjectId });
-      ctx.toast(t("copyDone", { project: targetName }));
+      const res = await post<BulkCopyResponse>(`/api/projects/${projectId}/items/copy`, {
+        item_ids: [itemId],
+        target_project_id: targetProjectId,
+      });
+      if (res.failed.length > 0) {
+        ctx.toast(
+          t("copyBulkPartial", {
+            copied: res.copied.length,
+            failed: res.failed.length,
+            reasons: res.failed.map((f) => f.error).join("; "),
+          }),
+          "error",
+        );
+      } else {
+        ctx.toast(t("copyBulkDone", { count: res.copied.length, project: targetName }));
+      }
     } catch (err) {
       ctx.toast(err instanceof Error ? err.message : t("copyFailed"), "error");
     }

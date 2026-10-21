@@ -202,15 +202,33 @@ Types: `StorageCompressRequest`, `StorageCompressResponse`,
   `mergeItemsOp`; the toolbar asks first (confirm dialog).
 - Copy to project: POST `/api/projects/[id]/items/[itemId]/copy`
   `{ target_project_id }` → `{ item_id, target_project_id, photos_copied,
-  selections_copied, notes_copied, rev }` (201). Deep copy: new rows for
+  selections_copied, notes_copied, transcriptions_copied, rev }` (201).
+  Deep copy: new rows for
   subjects/items/images/photos/selections/metadata values+links/
-  taggings/notes; originals + thumbnails copied via `storage.copy()` to
+  taggings/notes/transcriptions; originals + thumbnails copied via `storage.copy()` to
   FRESH keys under the target project (delete-independence is binding —
   no shared keys, ever); failed copies delete their copied objects.
   Template maps by URI, else name, else is copied into the target; tags
   map by name (created with source color when missing). Lists are NOT
-  copied (copy lands unfiled); transcriptions are not copied (wave-C
-  table, no v1 data). Target counters + rev bump in the copy transaction.
+  copied (copy lands unfiled). Target counters + rev bump in the copy transaction.
+- Bulk copy + copy/paste (row 32 fix, 2026-10-21, commit `7881329`): POST
+  `/api/projects/[id]/items/copy` `{ item_ids, target_project_id }` →
+  `{ target_project_id, copied: […CopyResult + source_item_id],
+  failed: [{ item_id, error }] }` (201). Each item copies independently;
+  a failure is reported with its reason and never stops or rolls back
+  the others. Transcriptions copy too: every non-deleted transcription
+  row of a copied photo's image is re-inserted against the NEW image id
+  (text/config/status/angle/mirror/words/page_width/page_height
+  verbatim) and a stored ALTO object is copied to the new row's fresh
+  key (`keys.transcription(target, newId)`), joining the same rollback
+  list as the photo originals — so the 0010 search trigger makes the
+  copy searchable in the target project on insert. App clipboard:
+  "Copy to project…" (selection bar / Ctrl/⌘+Shift+C) stores item refs
+  (source project id + item ids) in localStorage (`lib/items/
+  clipboard.ts`; no server clipboard table); "Paste items" (center
+  header button / Ctrl/⌘+Shift+V) in any project runs the bulk copy
+  for all refs and toasts honest copied/failed counts. The Inspector's
+  single-item "Copy to project…" menu uses the same bulk path.
 - Bundle (corrected 2026-10-21, Wave C Task 0): the workspace route's
   First Load JS at the close of Wave B2 is **211.93 KB gzip**, measured by
   QA with the canonical method in INTEGRATION-DECISIONS.md
@@ -300,8 +318,11 @@ Types: `StorageCompressRequest`, `StorageCompressResponse`,
   needed.
 - Known limits: multi-page ALTO documents use the FIRST `<Page>`'s
   geometry (words from later pages are kept in reading order but share
-  page 1's coordinate space); copy-to-project still does not copy
-  transcriptions (unchanged from Wave B2).
+  page 1's coordinate space). The former limit "copy-to-project does
+  not copy transcriptions" is REMOVED by the row-32 fix (2026-10-21,
+  commit `7881329` on branch `fix/row32-copy-complete`): copied photos carry their
+  transcriptions (rows + ALTO objects) into the target project — see
+  the Wave B copy section above.
 
 ## Wave D — Integrations + Developer API (rows 25/26/36)
 

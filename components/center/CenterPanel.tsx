@@ -26,6 +26,7 @@ import {
 import { get, post } from "@/lib/api/client";
 import {
   runCommand,
+  refreshAndBroadcast,
   trashSubjectsOp,
   attachTagsOp,
   mergeItemsOp,
@@ -41,6 +42,15 @@ import { useOffline } from "@/lib/pwa/useConnectivity";
 import { CheckIcon, SelectionCountIcon, NoteIcon } from "@/components/ui/icons";
 import { EmptyArt } from "@/components/ui/EmptyArt";
 import { renderSnippet } from "@/lib/search-snippet";
+import {
+  makeClipboard,
+  writeItemClipboard,
+  readItemClipboard,
+  planPaste,
+  executePaste,
+  CLIPBOARD_CHANGED_EVENT,
+  type ItemClipboard,
+} from "@/lib/items/clipboard";
 import type { Item, Tag } from "@/lib/api/types";
 import TrashView from "@/components/trash/TrashView";
 
@@ -631,6 +641,15 @@ function SelectionToolbar({
     window.location.href = `/api/projects/${projectId}/export/${kind}?${qs.toString()}`;
   }
 
+  // Row 32 fix: store the selection's refs in the app clipboard; the
+  // copy itself runs via "Paste items" in the target project.
+  function copySelection() {
+    const clip = makeClipboard(projectId, selectedIds);
+    if (!clip) return;
+    writeItemClipboard(clip);
+    ctx.toast(t("copyStored", { count: clip.itemIds.length }));
+  }
+
   return (
     <div className="ez-selection-bar" role="toolbar" aria-label="selection">
       <strong>
@@ -638,6 +657,9 @@ function SelectionToolbar({
       </strong>
       <button type="button" className="ez-btn ez-btn--sm" onClick={() => setSelectedIds([])}>
         {t("deselect")}
+      </button>
+      <button type="button" className="ez-btn ez-btn--sm" onClick={copySelection}>
+        {t("copyToProject")}
       </button>
       {selectedIds.length >= 2 ? (
         <button
@@ -749,6 +771,70 @@ function SelectionToolbar({
         </Dialog>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Row 32 fix: "Paste items" — visible whenever the app clipboard holds
+ * item refs; executes the bulk copy from the source project into THIS
+ * project and reports honest copied/failed counts.
+ */
+function PasteItemsButton({ projectId, ctx }: { projectId: string; ctx: OpContext }) {
+  const t = useTranslations("center");
+  const [clip, setClip] = useState<ItemClipboard | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const refresh = () => setClip(readItemClipboard());
+    refresh();
+    window.addEventListener(CLIPBOARD_CHANGED_EVENT, refresh);
+    window.addEventListener("storage", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.removeEventListener(CLIPBOARD_CHANGED_EVENT, refresh);
+      window.removeEventListener("storage", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, []);
+
+  if (!clip || clip.itemIds.length === 0) return null;
+
+  async function paste() {
+    const plan = planPaste(clip, projectId);
+    if (!plan) {
+      ctx.toast(t("pasteEmpty"), "error");
+      return;
+    }
+    setBusy(true);
+    try {
+      const summary = await executePaste(plan, post);
+      const reasons = summary.failed.map((f) => f.reason).join("; ");
+      if (summary.failed.length === 0) {
+        ctx.toast(t("pasteDone", { copied: summary.copied }));
+      } else if (summary.copied > 0) {
+        ctx.toast(
+          t("pastePartial", { copied: summary.copied, failed: summary.failed.length, reasons }),
+          "error",
+        );
+      } else {
+        ctx.toast(t("pasteFailed", { reasons }), "error");
+      }
+      if (summary.copied > 0) await refreshAndBroadcast(ctx, ["items", "meter"]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className="ez-btn ez-btn--sm"
+      disabled={busy}
+      title={t("pasteItemsHint", { count: clip.itemIds.length })}
+      onClick={paste}
+    >
+      {t("pasteItems")} ({clip.itemIds.length})
+    </button>
   );
 }
 
@@ -1047,6 +1133,7 @@ export default function CenterPanel({ projectId }: { projectId: string }) {
           <span>{t("itemsCount", { count: items.length })}</span>
         </nav>
         <span className="ez-spacer" />
+        <PasteItemsButton projectId={projectId} ctx={ctx} />
         <label style={{ fontSize: 12, color: "var(--ink-2)" }}>
           {t("sort")}{" "}
           <select
