@@ -81,7 +81,33 @@ const OCR_CACHE_CAP_BYTES = 12 * 1024 * 1024;
 
 const serwist = new Serwist({
   precacheEntries,
-  precacheOptions: { cleanupOutdatedCaches: true },
+  precacheOptions: {
+    cleanupOutdatedCaches: true,
+    plugins: [
+      {
+        // E-SEC-6/10(b) for the STATIC precache (the document cache has
+        // its own guard in precacheDocuments below): Serwist's stock
+        // PrecacheStrategy pushes a plugin that COPIES redirected
+        // responses into the cache — behind the Vercel SSO gate that
+        // would cache the login page's HTML under a chunk URL when an
+        // install runs unauthenticated. This plugin runs first and
+        // refuses every non-200 / redirected / opaque precache
+        // response; Serwist then fails the install
+        // (bad-precaching-response) instead of caching it. It is the
+        // ONLY cacheWillUpdate plugin, so it also carries the stock
+        // plugin's status>=400 refusal (subsumed by status !== 200).
+        cacheWillUpdate: async ({ response }) => {
+          if (!response || response.status !== 200 || response.redirected) {
+            return null;
+          }
+          if (response.type === "opaque" || response.type === "opaqueredirect") {
+            return null;
+          }
+          return response;
+        },
+      },
+    ],
+  },
   skipWaiting: true,
   clientsClaim: true,
   navigationPreload: false,

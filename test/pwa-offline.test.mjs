@@ -130,6 +130,17 @@ describe('build-artifact contract (E-SEC-4/15)', () => {
     assert.ok(config.swSrc === 'app/sw.ts');
   });
 
+  it('SW source guards the static precache against SSO redirects (E-SEC-10b)', () => {
+    // Serwist's stock precache strategy copies redirected responses into
+    // the cache; app/sw.ts must carry a cacheWillUpdate plugin that
+    // refuses redirected / non-200 precache responses so an install
+    // behind the SSO gate fails instead of caching the login page.
+    const src = readFileSync(new URL('../app/sw.ts', import.meta.url), 'utf8');
+    assert.ok(src.includes('cacheWillUpdate'), 'precache cacheWillUpdate guard present');
+    assert.ok(/response\.redirected/.test(src), 'guard refuses redirected precache responses');
+    assert.ok(/response\.status !== 200/.test(src), 'guard refuses non-200 precache responses');
+  });
+
   it('built public/sw.js (when present) has no /api caching rule and no defaultCache', () => {
     const swPath = new URL('../public/sw.js', import.meta.url);
     if (!existsSync(swPath)) {
