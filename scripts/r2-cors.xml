@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CORS policy for the `ezvault-data` R2 bucket (scripts/r2-cors.xml).
+
+  REQUIRED for uploads: the browser PUTs file bytes directly to R2 via
+  presigned URLs (lib/import/upload.ts). Without this policy the browser
+  preflight fails and every upload dies with "Upload failed (network)".
+  ExposeHeaders ETag is load-bearing — browser JS cannot read response
+  headers cross-origin unless they are exposed here.
+
+  Apply / verify: see DEPLOY-RUNBOOK.md §2 step 4.
+-->
+<CORSConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <CORSRule>
+    <AllowedOrigin>https://ezvault-nx9161s-projects.vercel.app</AllowedOrigin>
+    <AllowedOrigin>https://*.vercel.app</AllowedOrigin>
+    <AllowedOrigin>http://localhost:3000</AllowedOrigin>
+    <AllowedMethod>PUT</AllowedMethod>
+    <AllowedMethod>GET</AllowedMethod>
+    <AllowedMethod>HEAD</AllowedMethod>
+    <AllowedHeader>*</AllowedHeader>
+    <ExposeHeader>ETag</ExposeHeader>
+    <ExposeHeader>x-amz-request-id</ExposeHeader>
+    <MaxAgeSeconds>3600</MaxAgeSeconds>
+  </CORSRule>
+</CORSConfiguration>

@@ -28,3 +28,8 @@ Notes:
 - The `nightly-cron` caller workflow additionally needs `APP_URL` and
   `VERCEL_BYPASS` (Deployment Protection bypass secret) as GitHub
   secrets — same reason.
+- The `ezvault-data` bucket carries a CORS policy (browser-direct
+  presigned uploads depend on it). It is bucket configuration, not an
+  env var: canonical copy at `scripts/r2-cors.xml`, apply/verify
+  commands in `DEPLOY-RUNBOOK.md` §2 step 4. A recreated bucket does
+  not inherit it — re-apply after any bucket rebuild.

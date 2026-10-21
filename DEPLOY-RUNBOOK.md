@@ -22,6 +22,29 @@ Neon, Cloudflare, and Vercel (all free tiers).
 3. R2 → Manage API tokens → create a token with Object Read & Write on
    both buckets. Save `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
    `R2_SECRET_ACCESS_KEY`.
+4. **Apply the bucket CORS policy to `ezvault-data`** (canonical copy:
+   `scripts/r2-cors.xml`). The browser uploads bytes directly to R2 via
+   presigned PUTs, so without CORS every upload fails in the browser with
+   "Upload failed (network)" while the server side looks healthy
+   (presign succeeds, no bytes ever land — this bit production on
+   2026-10-21; a recreated bucket silently loses the policy, so re-apply
+   after any bucket rebuild). `ExposeHeaders: ETag` is load-bearing.
+
+   ```bash
+   set -a; . ./.env.local; set +a
+   MD5=$(openssl md5 -binary scripts/r2-cors.xml | openssl base64)
+   # Apply (PutBucketCors):
+   curl -X PUT --aws-sigv4 'aws:amz:auto:s3' \
+     --user "$R2_ACCESS_KEY_ID:$R2_SECRET_ACCESS_KEY" \
+     -H "Content-MD5: $MD5" -H 'Content-Type: application/xml' \
+     --data-binary @scripts/r2-cors.xml \
+     "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com/$R2_BUCKET_DATA?cors"
+   # Verify (GetBucketCors — expect the stored policy back, not
+   # NoSuchCORSConfiguration):
+   curl --aws-sigv4 'aws:amz:auto:s3' \
+     --user "$R2_ACCESS_KEY_ID:$R2_SECRET_ACCESS_KEY" \
+     "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com/$R2_BUCKET_DATA?cors"
+   ```
 
 ## 3. Apply migrations (in filename order)
 
