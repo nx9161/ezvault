@@ -22,9 +22,12 @@ import type {
   ProjectStats,
 } from "@/lib/types";
 import {
+  adaptHealth,
   adaptItem,
   adaptMetadataValues,
+  adaptNote,
   adaptPhoto,
+  adaptProject,
   adaptSelection,
   adaptTemplate,
   thumbUrl as buildThumbUrl,
@@ -82,7 +85,16 @@ export const key = {
 export function useProjects() {
   return useSWR<{ items: Project[]; total: number } | Project[]>(
     key.projects,
-    fetcher,
+    // adaptProject: projects.rev is BIGINT → a string on the wire (see
+    // lib/api/types.ts); the declared Project type promises a number.
+    async (url: string) => {
+      const raw = await get<{ items: unknown[]; total: number } | unknown[]>(url);
+      if (Array.isArray(raw)) return raw.map((p) => adaptProject(p as Parameters<typeof adaptProject>[0]));
+      return {
+        items: (raw.items ?? []).map((p) => adaptProject(p as Parameters<typeof adaptProject>[0])),
+        total: raw.total ?? 0,
+      };
+    },
     swrDefaults,
   );
 }
@@ -90,7 +102,7 @@ export function useProjects() {
 export function useProject(projectId: string | null) {
   return useSWR<Project>(
     projectId ? key.project(projectId) : null,
-    fetcher,
+    async (url: string) => adaptProject(await get(url)),
     swrDefaults,
   );
 }
@@ -181,7 +193,15 @@ export function useNotes(
 ) {
   return useSWR<{ items: NoteDoc[]; total: number }>(
     projectId && subjectId ? noteKey(projectId, subjectId, kind) : null,
-    fetcher,
+    // adaptNote stamps project_id: the notes table has no such column and
+    // the list routes omit it, but NoteDoc promises it (see ./types).
+    async (url: string) => {
+      const raw = await get<{ items: unknown[]; total: number }>(url);
+      return {
+        items: (raw.items ?? []).map((n) => adaptNote(n as Parameters<typeof adaptNote>[0], projectId as string)),
+        total: raw.total ?? 0,
+      };
+    },
     swrDefaults,
   );
 }
@@ -303,7 +323,7 @@ export function useCpuBudget() {
 }
 
 export function useHealth() {
-  return useSWR<HealthResponse>(key.health, fetcher, {
+  return useSWR<HealthResponse>(key.health, async (url: string) => adaptHealth(await get(url)), {
     ...swrDefaults,
     refreshInterval: 30_000,
   });

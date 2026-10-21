@@ -16,6 +16,8 @@ import type {
   Note as BackendNote,
   Template as BackendTemplate,
   TemplateField as BackendTemplateField,
+  Project as BackendProject,
+  HealthResponse as BackendHealth,
 } from "@/lib/types";
 
 export type {
@@ -315,6 +317,77 @@ export function metadataWire(
     ...(datatypes?.[property_uri] ? { datatype: datatypes[property_uri] } : {}),
     ...(languages?.[property_uri] ? { language: languages[property_uri] } : {}),
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Project / note / health adapters — wire quirks the raw fetcher used to
+// pass straight through, so the data broke the hooks' declared types at
+// runtime (the class behind the useLists "{ lists }" crash).
+// ---------------------------------------------------------------------------
+
+type WireProject = Omit<BackendProject, "rev" | "default_density"> & {
+  rev: number | string;
+  default_density?: number | string | null;
+};
+
+/** projects.rev is BIGINT — Neon serializes it as a string ("0") while the
+ * declared Project type promises a number. default_density rides migration
+ * 0008; a database without it omits the field entirely, so fall back to
+ * the canonical default (300 — DEFAULT_RENDER_DENSITY in
+ * lib/import/density.ts, the same fallback every consumer encoded). */
+export function adaptProject(raw: WireProject): BackendProject {
+  return {
+    ...raw,
+    rev: Number(raw.rev ?? 0),
+    default_density: raw.default_density != null ? Number(raw.default_density) : 300,
+  };
+}
+
+/** Notes have no project_id column (ownership runs through the subject);
+ * the notes routes verify the subject belongs to the project before
+ * answering, so the hook stamps the id it already knows. Without this,
+ * NoteDoc.project_id (promised by the type) was undefined at runtime. */
+export function adaptNote(raw: BackendNote, projectId: string): NoteDoc {
+  return { ...raw, project_id: raw.project_id ?? projectId };
+}
+
+export interface HealthWireCheck {
+  status?: string;
+  detail?: string;
+}
+
+/** The actual GET /api/health payload: nested per-check objects, NOT the
+ * flattened HealthResponse the hooks layer declares. */
+export interface HealthWire {
+  status?: string;
+  checks?: Record<string, HealthWireCheck | undefined>;
+}
+
+/** Map the health route's nested checks onto the flattened HealthResponse.
+ * The raw fetcher passed the envelope through untouched, so StatusBar read
+ * health.neon / health.r2 off the wrong level — both undefined — and showed
+ * the Database + Storage chips red ("Something needs attention") on a fully
+ * healthy backend. */
+export function adaptHealth(raw: HealthWire): BackendHealth {
+  const checks = raw?.checks ?? {};
+  const statusOf = (name: string): "ok" | "error" =>
+    checks[name]?.status === "ok" ? "ok" : "error";
+  const storage = checks["storage"];
+  // Queue detail is a human count ("0 jobs"); the route does not break out
+  // running/failed, so those stay 0 rather than being invented.
+  const queued = Number.parseInt(checks["queue"]?.detail ?? "", 10);
+  // Codecs detail is a comma list of "name:ok" / "name:error" pairs.
+  const codecs: Record<string, boolean> = {};
+  for (const part of (checks["codecs"]?.detail ?? "").split(",")) {
+    const i = part.lastIndexOf(":");
+    if (i > 0) codecs[part.slice(0, i).trim()] = part.slice(i + 1).trim() === "ok";
+  }
+  return {
+    neon: statusOf("neon"),
+    r2: !storage ? "unconfigured" : storage.status === "ok" ? "ok" : "error",
+    queue: { queued: Number.isFinite(queued) ? queued : 0, running: 0, failed: 0 },
+    codecs,
+  };
 }
 
 // ---------------------------------------------------------------------------
