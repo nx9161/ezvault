@@ -268,7 +268,20 @@ function GlobalDropZone() {
   );
 }
 
-export default function WorkspaceClient({ projectId }: { projectId: string }) {
+export default function WorkspaceClient({ projectId: projectIdProp }: { projectId: string }) {
+  // Wave E: the offline fallback serves ONE precached project-shell
+  // document (the representative /pwa-project-shell render of this
+  // route) for any /[projectId] URL. The URL is the authority for which
+  // project is open, so correct the id from the path on mount — online
+  // this is always identical to the server-passed prop (a no-op).
+  const [projectId, setProjectId] = useState(projectIdProp);
+  useEffect(() => {
+    const seg = window.location.pathname.split("/").filter(Boolean);
+    if (seg.length === 1) {
+      const fromUrl = decodeURIComponent(seg[0]);
+      if (fromUrl !== projectIdProp) setProjectId(fromUrl);
+    }
+  }, [projectIdProp]);
   const ctx = useOpContext(projectId);
   // D-INTc: global bindings live in lib/shortcuts/registry.ts, bound by
   // <RegisteredHotkeys/> rendered below (replaces useGlobalShortcuts).

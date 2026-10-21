@@ -11,7 +11,8 @@ import { useProjects } from "@/lib/api/hooks";
 import { post } from "@/lib/api/client";
 import { useUiStore } from "@/lib/store/ui";
 import { Dialog } from "@/components/ui/Dialog";
-import { ErrorCard, SkeletonRows } from "@/components/ui/Feedback";
+import { ErrorCard, OfflineUnavailable, SkeletonRows } from "@/components/ui/Feedback";
+import { useOffline } from "@/lib/pwa/useConnectivity";
 import { Toasts } from "@/components/ui/Toasts";
 import type { Project } from "@/lib/api/types";
 
@@ -24,6 +25,7 @@ export default function Home() {
   const t = useTranslations("projectHome");
   const tc = useTranslations("app");
   const { data, error, isLoading, mutate } = useProjects();
+  const offline = useOffline();
   const pushToast = useUiStore((s) => s.pushToast);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
@@ -47,7 +49,13 @@ export default function Home() {
       {isLoading ? (
         <SkeletonRows rows={4} />
       ) : error ? (
-        <ErrorCard what={t("title")} onRetry={() => mutate()} />
+        offline ? (
+          <OfflineUnavailable />
+        ) : (
+          <ErrorCard what={t("title")} onRetry={() => mutate()} />
+        )
+      ) : offline && asList(data).length === 0 ? (
+        <OfflineUnavailable />
       ) : asList(data).length === 0 ? (
         <div className="ez-state" style={{ height: "auto", padding: "32px 0" }}>
           <p>{t("empty")}</p>

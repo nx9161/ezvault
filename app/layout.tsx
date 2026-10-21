@@ -1,13 +1,34 @@
 // SPDX-License-Identifier: MIT
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, getTranslations } from "next-intl/server";
+import PwaProvider from "@/components/pwa/PwaProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "EZVault — personal photo-research workspace",
   description:
     "EZVault is an independent personal cloud photo-research workspace. Not affiliated with the Tropy project.",
+  // Wave E installability: app/manifest.ts supplies the web app
+  // manifest; these fields supply the Apple/meta wiring Next needs.
+  applicationName: "EZVault",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "EZVault",
+  },
+  icons: {
+    apple: "/icons/apple-touch-icon.png",
+  },
+  formatDetection: { telephone: false },
+};
+
+// Design tokens (app/globals.css): light --bg #FAF8F3, dark --bg #14120E.
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#FAF8F3" },
+    { media: "(prefers-color-scheme: dark)", color: "#14120E" },
+  ],
 };
 
 // Applies the persisted theme before first paint (no FOUC). Reads the same
@@ -34,7 +55,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           {t("skipToInspector")}
         </a>
         <NextIntlClientProvider messages={messages} locale="en">
-          {children}
+          <PwaProvider>{children}</PwaProvider>
         </NextIntlClientProvider>
       </body>
     </html>

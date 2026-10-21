@@ -36,7 +36,8 @@ import { Dialog } from "@/components/ui/Dialog";
 import { useOpContext } from "@/components/sidebar/Sidebar";
 import { startTour } from "@/lib/tour/launcher";
 import { Menu, MenuItem, MenuLabel } from "@/components/ui/Menu";
-import { ErrorCard, SkeletonCards, SkeletonRows } from "@/components/ui/Feedback";
+import { ErrorCard, OfflineUnavailable, SkeletonCards, SkeletonRows } from "@/components/ui/Feedback";
+import { useOffline } from "@/lib/pwa/useConnectivity";
 import { CheckIcon, SelectionCountIcon, NoteIcon } from "@/components/ui/icons";
 import { EmptyArt } from "@/components/ui/EmptyArt";
 import { renderSnippet } from "@/lib/search-snippet";
@@ -833,6 +834,7 @@ function SearchResults({ projectId }: { projectId: string }) {
   const setSelectedIds = useUiStore((s) => s.setSelectedIds);
   const setSearchActive = useUiStore((s) => s.setSearchActive);
   const { data, error, isLoading } = useSearch(projectId, activeQuery, searchScope);
+  const offline = useOffline();
 
   const results = data?.hits ?? [];
 
@@ -880,12 +882,20 @@ function SearchResults({ projectId }: { projectId: string }) {
       {isLoading ? (
         <div className="ez-grid-scroll"><SkeletonRows rows={6} /></div>
       ) : error ? (
-        <ErrorCard what={t("resultsFor", { query: activeQuery })} />
+        offline ? (
+          <OfflineUnavailable />
+        ) : (
+          <ErrorCard what={t("resultsFor", { query: activeQuery })} />
+        )
       ) : results.length === 0 ? (
-        <div className="ez-state">
-          <h2>{t("noResults", { query: activeQuery })}</h2>
-          <p>{t("noResultsBody")}</p>
-        </div>
+        offline ? (
+          <OfflineUnavailable />
+        ) : (
+          <div className="ez-state">
+            <h2>{t("noResults", { query: activeQuery })}</h2>
+            <p>{t("noResultsBody")}</p>
+          </div>
+        )
       ) : (
         results.map((r) => (
           <button
@@ -942,6 +952,7 @@ export default function CenterPanel({ projectId }: { projectId: string }) {
     () => (searchActive || libraryFilter === "trash" ? [] : (data?.items ?? [])),
     [data, searchActive, libraryFilter],
   );
+  const offline = useOffline();
   const ctx = useOpContext(projectId);
 
   // F-A: drag-reorder within a list. The server persists absolute positions
@@ -1023,7 +1034,9 @@ export default function CenterPanel({ projectId }: { projectId: string }) {
     );
   }
 
-  const emptyLibrary = !isLoading && !error && items.length === 0 && libraryFilter === "all" && !activeListId && activeTagIds.length === 0;
+  // E-SEC-19: offline with nothing loaded is "unavailable", never a
+  // false empty-library / empty-list claim.
+  const emptyLibrary = !offline && !isLoading && !error && items.length === 0 && libraryFilter === "all" && !activeListId && activeTagIds.length === 0;
 
   return (
     <section className="ez-center" aria-label={breadcrumb}>
@@ -1068,7 +1081,13 @@ export default function CenterPanel({ projectId }: { projectId: string }) {
       {isLoading ? (
         <div className="ez-grid-scroll"><SkeletonCards /></div>
       ) : error ? (
-        <ErrorCard what={t("breadcrumbAll")} onRetry={() => mutate()} />
+        offline ? (
+          <OfflineUnavailable />
+        ) : (
+          <ErrorCard what={t("breadcrumbAll")} onRetry={() => mutate()} />
+        )
+      ) : offline && items.length === 0 ? (
+        <OfflineUnavailable />
       ) : emptyLibrary ? (
         <div className="ez-state">
           <EmptyArt variant="library" />

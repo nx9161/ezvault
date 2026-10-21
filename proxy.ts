@@ -130,6 +130,14 @@ export function proxy(req: NextRequest): NextResponse {
 
   const res = NextResponse.next();
 
+  // Wave E (E-SEC-7): the service worker script itself is never cached
+  // and always revalidated, so a new deployment's SW is detected
+  // within one navigation. This header complement for /sw.js is the
+  // ONLY proxy change Wave E makes (E-SEC-26).
+  if (pathname === '/sw.js') {
+    res.headers.set('Cache-Control', 'no-cache, max-age=0, must-revalidate');
+  }
+
   // Strict CSP — zero inline scripts. R2 host derived from env at request
   // time (F1). (Vercel Authentication challenge pages are platform-hosted
   // and unaffected.)

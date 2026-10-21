@@ -690,6 +690,28 @@ details.ez-collapsible > summary { padding: 8px 12px; cursor: pointer; font-size
 }
 
 
+/* ---------- Wave E: offline / session states ---------- */
+/* Stale marking (E-SEC-21): while offline, on-screen data is visibly
+   de-emphasized under the persistent offline banner. */
+html[data-offline="true"] .ez-center,
+html[data-offline="true"] .ez-sidebar,
+html[data-offline="true"] .ez-inspector {
+  filter: saturate(0.82);
+}
+.ez-session-expired {
+  position: fixed; inset: 0; z-index: 500;
+  background: rgba(20, 15, 5, .55);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.ez-session-expired-card {
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: 0 12px 40px rgba(20, 15, 5, .25);
+  max-width: 440px; width: 100%; padding: 24px;
+}
+.ez-session-expired-card h2 { margin: 0 0 8px; font-size: 19px; }
+.ez-session-expired-card p { margin: 0 0 16px; color: var(--ink-2); line-height: 1.55; }
+
 /* Wave C (row 13): selectable transcription text layer over the photo.
    Spans carry the transcribed words in transparent text — invisible
    until selected, positioned at the ALTO/OCR word boxes. */

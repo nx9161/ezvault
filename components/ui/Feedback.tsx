@@ -27,6 +27,22 @@ export function ErrorCard({
   );
 }
 
+/**
+ * Wave E (E-SEC-19): the honest offline state for a data region. Offline
+ * must NEVER render a false empty state ("Your archive is empty",
+ * "No results", an empty list) — SWR having no data because every fetch
+ * failed is not evidence the library is empty.
+ */
+export function OfflineUnavailable() {
+  const t = useTranslations("app");
+  return (
+    <div className="ez-state" data-offline-unavailable="true">
+      <h2>{t("offlineUnavailableTitle")}</h2>
+      <p>{t("offlineUnavailableBody")}</p>
+    </div>
+  );
+}
+
 export function SkeletonRows({ rows = 6 }: { rows?: number }) {
   return (
     <div aria-hidden="true" style={{ display: "flex", flexDirection: "column", gap: 8 }}>

@@ -25,6 +25,7 @@ import {
 } from "@/lib/shortcuts/registry";
 import { key } from "@/lib/api/hooks";
 import { get } from "@/lib/api/client";
+import { useOffline } from "@/lib/pwa/useConnectivity";
 import type { SearchHit, SearchResponse } from "@/lib/types";
 
 const RECENT_KEY = (projectId: string) => `ezvault:recent-items:${projectId}:v1`;
@@ -87,6 +88,7 @@ export default function CommandPalette({
   const tse = useTranslations("search");
   const open = useUiStore((s) => s.paletteOpen);
   const setOpen = useUiStore((s) => s.setPaletteOpen);
+  const offline = useOffline();
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<ResolvedHit[]>([]);
   const [recent, setRecent] = useState<RecentItem[]>([]);
@@ -221,8 +223,20 @@ export default function CommandPalette({
         className="ez-palette-input"
       />
       <Command.List className="ez-palette-list">
+        {offline && query.trim().length >= 2 ? (
+          <div className="ez-palette-empty" role="note">
+            {t("searchUnavailableOffline")}
+          </div>
+        ) : null}
         <Command.Empty>
-          <span className="ez-palette-empty">{t("noResults")}</span>
+          {/* E-SEC-21: offline, server search is "unavailable" — never
+              an empty result set. Recents (localStorage) still work and
+              are labelled as on-device below. */}
+          <span className="ez-palette-empty">
+            {offline && query.trim().length >= 2
+              ? t("searchUnavailableOffline")
+              : t("noResults")}
+          </span>
         </Command.Empty>
         {rankedActions.length > 0 && (
           <Command.Group heading={t("actions")}>
@@ -240,7 +254,7 @@ export default function CommandPalette({
           </Command.Group>
         )}
         {rankedRecent.length > 0 && (
-          <Command.Group heading={t("recent")}>
+          <Command.Group heading={offline ? t("recentOfflineNote") : t("recent")}>
             {rankedRecent.map((r) => (
               <Command.Item
                 key={`recent-${r.id}`}
