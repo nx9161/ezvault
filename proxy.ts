@@ -11,8 +11,9 @@
  *      a scoped token can never ride the human path on an unwired route.
  *   1. CSRF: Origin/Referer allowlist check on mutating routes (POST/PUT/
  *      PATCH/DELETE) — defense-in-depth; route handlers re-check.
- *   2. Strict Content-Security-Policy with ZERO inline scripts (no
- *      'unsafe-inline' in script-src).
+ *   2. Strict Content-Security-Policy: executable inline code is admitted
+ *      only when Next.js stamps it with the per-request nonce generated
+ *      here (no 'unsafe-inline' in script-src).
  *   3. Security headers (HSTS, X-Frame-Options, etc.).
  *   4. Best-effort in-memory token bucket as the OUTER rate-limit layer
  *      (durable Neon rate_buckets enforce inside the route handlers —
@@ -57,6 +58,20 @@ function tokenBucketOk(key: string): boolean {
 }
 
 /**
+ * Generate a fresh 128-bit CSP nonce for one request. The value is exposed
+ * to the app through the x-nonce request header; the root layout reads it
+ * for its one hand-written inline script, while Next.js uses the same
+ * request CSP to stamp its framework/RSC bootstrap scripts.
+ */
+export function generateNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+/**
  * Build the Content-Security-Policy header value.
  *
  * The R2 host is read from env at request time (the presigned URLs the R2
@@ -64,16 +79,22 @@ function tokenBucketOk(key: string): boolean {
  * upload PUTs and the 302-redirected viewer fetches/images would otherwise
  * be connect-src/img-src blocked in production. When R2 env is absent
  * (local dev -> the local driver serves same-origin), no R2 host is added
- * and local behavior is unchanged. script-src stays strict — no
- * unsafe-inline, ever.
+ * and local behavior is unchanged. A supplied nonce admits only Next's
+ * nonce-stamped bootstrap/theme scripts; 'unsafe-inline' is never used.
  */
-export function buildCspHeader(r2AccountId?: string | null): string {
+export function buildCspHeader(
+  r2AccountId?: string | null,
+  nonce?: string | null,
+): string {
   const r2Hosts = r2AccountId ? ['https://*.r2.cloudflarestorage.com'] : [];
   const imgSrc = ["'self'", 'blob:', 'data:', ...r2Hosts].join(' ');
   const connectSrc = ["'self'", ...r2Hosts].join(' ');
+  const scriptSrc = nonce
+    ? `'self' 'nonce-${nonce}' 'strict-dynamic'`
+    : "'self'";
   return [
     "default-src 'self'",
-    "script-src 'self'",
+    `script-src ${scriptSrc}`,
     "style-src 'self' 'unsafe-inline'", // TipTap/prose needs inline styles
     `img-src ${imgSrc}`,
     `connect-src ${connectSrc}`,
@@ -128,7 +149,17 @@ export function proxy(req: NextRequest): NextResponse {
     }
   }
 
-  const res = NextResponse.next();
+  const nonce = generateNonce();
+  const csp = buildCspHeader(process.env.R2_ACCOUNT_ID, nonce);
+
+  // Next.js looks for the request CSP + x-nonce while rendering and
+  // stamps its inline RSC/hydration scripts (and only those) with this
+  // request's nonce. The matching response CSP is set below.
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('Content-Security-Policy', csp);
+
+  const res = NextResponse.next({ request: { headers: requestHeaders } });
 
   // Wave E (E-SEC-7): the service worker script itself is never cached
   // and always revalidated, so a new deployment's SW is detected
@@ -138,10 +169,10 @@ export function proxy(req: NextRequest): NextResponse {
     res.headers.set('Cache-Control', 'no-cache, max-age=0, must-revalidate');
   }
 
-  // Strict CSP — zero inline scripts. R2 host derived from env at request
-  // time (F1). (Vercel Authentication challenge pages are platform-hosted
-  // and unaffected.)
-  res.headers.set('Content-Security-Policy', buildCspHeader(process.env.R2_ACCOUNT_ID));
+  // Strict CSP with a fresh per-request nonce. R2 host derived from
+  // env at request time (F1). (Vercel Authentication challenge pages are
+  // platform-hosted and unaffected.)
+  res.headers.set('Content-Security-Policy', csp);
   res.headers.set('X-Frame-Options', 'DENY');
   res.headers.set('X-Content-Type-Options', 'nosniff');
   res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');

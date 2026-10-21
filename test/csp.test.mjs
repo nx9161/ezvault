@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildCspHeader } from '../proxy';
+import { NextRequest } from 'next/server';
+import { buildCspHeader, generateNonce, proxy } from '../proxy';
 
 const R2 = 'https://*.r2.cloudflarestorage.com';
 
@@ -39,11 +40,37 @@ describe('buildCspHeader (F1)', () => {
     }
   });
 
-  it('keeps script-src strict — no unsafe-inline, ever', () => {
+  it('keeps the no-nonce builder fallback self-only (no unsafe-inline)', () => {
     const d = directives(buildCspHeader('abc123'));
     assert.equal(d['script-src'], "'self'");
     // unsafe-inline is allowed ONLY in style-src (TipTap/prose requirement)
     assert.equal(d['style-src'], "'self' 'unsafe-inline'");
+  });
+
+  it('adds the per-request nonce + strict-dynamic when a nonce is supplied', () => {
+    const nonce = 'testNonce1234567890AB==';
+    const d = directives(buildCspHeader('abc123', nonce));
+    assert.equal(d['script-src'], `'self' 'nonce-${nonce}' 'strict-dynamic'`);
+    assert.ok(!d['script-src'].includes("'unsafe-inline'"));
+  });
+
+  it('generates distinct 128-bit base64 nonces', () => {
+    const a = generateNonce();
+    const b = generateNonce();
+    assert.match(a, /^[A-Za-z0-9+/]{22}==$/);
+    assert.match(b, /^[A-Za-z0-9+/]{22}==$/);
+    assert.notEqual(a, b);
+  });
+
+  it('proxy forwards the same nonce + CSP to Next and returns that CSP', () => {
+    const res = proxy(new NextRequest('https://ez.example.org/'));
+    const csp = res.headers.get('content-security-policy');
+    const d = directives(csp);
+    const match = d['script-src'].match(/'nonce-([^']+)'/);
+    assert.ok(match, `script-src must carry a nonce: ${d['script-src']}`);
+    assert.equal(d['script-src'], `'self' 'nonce-${match[1]}' 'strict-dynamic'`);
+    assert.equal(res.headers.get('x-middleware-request-x-nonce'), match[1]);
+    assert.equal(res.headers.get('x-middleware-request-content-security-policy'), csp);
   });
 
   it('retains the remaining hardening directives unchanged', () => {

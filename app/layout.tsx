@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages, getTranslations } from "next-intl/server";
 import PwaProvider from "@/components/pwa/PwaProvider";
@@ -36,6 +37,7 @@ export const viewport: Viewport = {
 const THEME_BOOTSTRAP = `(function(){try{var raw=localStorage.getItem('ezvault-ui');var theme=raw&&JSON.parse(raw).state&&JSON.parse(raw).state.theme;if(theme!=='dark'&&theme!=='light'){theme=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',theme);}catch(e){document.documentElement.setAttribute('data-theme','light');}})();`;
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   const locale = await getLocale();
   const messages = await getMessages();
   const t = await getTranslations("app");
@@ -43,7 +45,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang={locale} suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
       </head>
       <body>
         <a className="skip-link" href="#ez-grid">
