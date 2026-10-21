@@ -9,6 +9,10 @@ out/
 dist/
 build/
 
+# Serwist (Wave E) — the generated service worker is a build artifact
+public/sw.js
+public/swe-worker-*.js
+
 # env (NEVER commit)
 .env
 .env*.local

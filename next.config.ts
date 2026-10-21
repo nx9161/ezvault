@@ -4,6 +4,12 @@ import createNextIntlPlugin from "next-intl/plugin";
 
 const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 
+// Wave E (APPSEC-REVIEW-PWA): the service worker (app/sw.ts →
+// public/sw.js) is built by Serwist in configurator mode AFTER
+// `next build` — see serwist.config.mjs for why (Turbopack build;
+// @serwist/next is webpack-only) and for the precache scope. Nothing
+// about the SW changes this Next config.
+
 const nextConfig: NextConfig = {
   // cacheComponents/PPR intentionally OFF: this is a private single-user
   // workspace — every route is dynamic (Vercel Authentication at the edge,
