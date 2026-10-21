@@ -21,7 +21,22 @@
  * Photos attach as media via the `url` ingester: Omeka fetches the
  * bytes itself from a presigned GET URL — the supported server-side
  * mechanism (the `upload` ingester is a browser multipart flow).
+ *
+ * Fetch hygiene (Wave D fix, finding 6): the base URL must be https —
+ * key auth travels in the query string, so http would put the credential
+ * on the wire in cleartext; http is allowed ONLY for loopback hosts
+ * (local dev instances). Every request carries an AbortController
+ * timeout, and response bodies are read through the fetch-guard's
+ * streaming byte cap (lib/fetch-guard.ts readBodyCapped) — the same
+ * discipline as the IIIF harvest fetches.
  */
+
+import { readBodyCapped, SsrfError } from '../fetch-guard';
+
+/** Per-request timeout for Omeka S API calls. */
+export const OMEKA_REQUEST_TIMEOUT_MS = 30_000;
+/** Response byte cap for Omeka S API calls (properties/items payloads). */
+export const OMEKA_RESPONSE_MAX_BYTES = 10 * 1024 * 1024;
 
 export type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -43,7 +58,22 @@ export class OmekaError extends Error {
   }
 }
 
-/** Normalize + validate an instance base URL (trailing slash stripped). */
+/** Loopback hosts (local dev Omeka instances) — the only http exception. */
+export function isLoopbackHostname(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
+  if (h === 'localhost' || h.endsWith('.localhost')) return true;
+  if (h === '::1') return true;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  return !!m && Number(m[1]) === 127; // 127.0.0.0/8 loopback
+}
+
+/**
+ * Normalize + validate an instance base URL (trailing slash stripped).
+ * https is REQUIRED except for loopback hosts: the API key credential
+ * travels as a query parameter, so a non-loopback http:// base URL
+ * would send it in cleartext (and into the remote server's logs).
+ * Enforced here so it holds at settings-save AND at client load.
+ */
 export function normalizeOmekaBaseUrl(raw: string): string {
   let url: URL;
   try {
@@ -52,7 +82,10 @@ export function normalizeOmekaBaseUrl(raw: string): string {
     throw new OmekaError(0, '', 'Omeka base URL is not a valid URL');
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new OmekaError(0, '', 'Omeka base URL must start with http:// or https://');
+    throw new OmekaError(0, '', 'Omeka base URL must start with https:// (http:// is allowed only for loopback hosts)');
+  }
+  if (url.protocol === 'http:' && !isLoopbackHostname(url.hostname)) {
+    throw new OmekaError(0, '', 'Omeka base URL must use https:// — the API key travels in the query string and http:// would send it in cleartext (http:// is allowed only for loopback hosts, e.g. http://localhost)');
   }
   if (url.username || url.password) {
     throw new OmekaError(0, '', 'Omeka base URL must not embed credentials');
@@ -125,13 +158,21 @@ export class OmekaClient {
   private keyIdentity: string;
   private keyCredential: string;
   private doFetch: FetchImpl;
+  private timeoutMs: number;
+  private maxResponseBytes: number;
   private propertyMap: Map<string, number> | null = null;
 
-  constructor(settings: OmekaSettingsInput, fetchImpl?: FetchImpl) {
+  constructor(
+    settings: OmekaSettingsInput,
+    fetchImpl?: FetchImpl,
+    opts: { timeoutMs?: number; maxResponseBytes?: number } = {},
+  ) {
     this.baseUrl = normalizeOmekaBaseUrl(settings.baseUrl);
     this.keyIdentity = settings.keyIdentity;
     this.keyCredential = settings.keyCredential;
     this.doFetch = fetchImpl ?? ((u, i) => fetch(u, i));
+    this.timeoutMs = opts.timeoutMs ?? OMEKA_REQUEST_TIMEOUT_MS;
+    this.maxResponseBytes = opts.maxResponseBytes ?? OMEKA_RESPONSE_MAX_BYTES;
   }
 
   /** API URL with key auth as query params (the Omeka S key-auth scheme). */
@@ -144,7 +185,12 @@ export class OmekaClient {
   }
 
   async request<T = Record<string, unknown>>(method: string, path: string, body?: unknown, params?: Record<string, string>): Promise<T> {
+    // Timeout (AbortController) + streaming response byte cap — the same
+    // discipline the fetch guard applies to IIIF fetches.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     let res: Response;
+    let text: string;
     try {
       res = await this.doFetch(this.apiUrl(path, params), {
         method,
@@ -153,12 +199,21 @@ export class OmekaClient {
           accept: 'application/json',
           'user-agent': 'EZVault/1.0 (+omeka-push)',
         },
+        signal: controller.signal,
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
+      text = (await readBodyCapped(res, this.maxResponseBytes)).toString('utf8');
     } catch (err) {
+      if (err instanceof SsrfError) {
+        throw new OmekaError(0, '', `Omeka S response exceeded the ${this.maxResponseBytes}-byte cap`);
+      }
+      if (controller.signal.aborted) {
+        throw new OmekaError(0, '', `Omeka S request timed out after ${this.timeoutMs}ms`);
+      }
       throw new OmekaError(0, '', `could not reach the Omeka S instance: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      clearTimeout(timer);
     }
-    const text = await res.text();
     if (!res.ok) throw new OmekaError(res.status, text);
     if (!text.trim()) return undefined as T;
     try {

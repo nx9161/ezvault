@@ -13,7 +13,11 @@ import 'server-only';
  * Push: one item -> Omeka item (create, or PUT-update when omeka_sync
  * already holds a remote id), photos attached once via the URL ingester
  * with a 1-hour presigned GET (media_map in omeka_sync tracks what is
- * attached). Errors from Omeka surface verbatim-ish (OmekaError body).
+ * attached). The sync row is persisted IMMEDIATELY after a successful
+ * create/update — before media attach — so a media failure lands as
+ * status/warning on the row and a re-push updates instead of
+ * duplicating the remote item. Errors from Omeka surface verbatim-ish
+ * (OmekaError body).
  * Project push runs the import_jobs pattern (kind 'omeka') with per-item
  * results in the job report.
  */
@@ -161,22 +165,39 @@ export async function pushItemToOmeka(projectId: string, itemId: string, client?
     throw err;
   }
 
+  // Persist the sync row IMMEDIATELY, before attaching media (Wave D
+  // fix, finding 3): the remote id is known the moment create/update
+  // succeeds. If media attachment then fails, the failure lands as
+  // status/warning on THIS row — a re-push takes the update path and
+  // can never duplicate the remote item.
+  await recordSync(projectId, itemId, remoteId, remoteUrl, mediaMap, 'ok', null);
+
   // Attach photos not yet on the remote item (URL ingester, 1h presign).
+  // A media failure does NOT fail the push: it is recorded on the sync
+  // row (last_status 'warning' + last_error) and in the warnings, and
+  // the unattached photo stays out of media_map so a re-push retries it.
   const storage = await getStorageDriver();
   let attached = 0;
+  let mediaError: string | null = null;
   for (const photo of item.photos) {
     if (mediaMap[photo.subject_id] !== undefined) continue;
     if (!photo.r2_key || photo.missing_original) {
       warnings.push(`photo ${photo.original_filename} has no original bytes — not attached`);
       continue;
     }
-    const sourceUrl = await storage.presignGet(photo.r2_key, { ttlSec: 3600, disposition: 'inline' });
-    const mediaId = await omeka.createMediaForItem(remoteId, sourceUrl, photo.original_filename, propertyIds);
-    mediaMap[photo.subject_id] = mediaId;
-    attached++;
+    try {
+      const sourceUrl = await storage.presignGet(photo.r2_key, { ttlSec: 3600, disposition: 'inline' });
+      const mediaId = await omeka.createMediaForItem(remoteId, sourceUrl, photo.original_filename, propertyIds);
+      mediaMap[photo.subject_id] = mediaId;
+      attached++;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      mediaError = message.slice(0, 1000);
+      warnings.push(`media attach failed for photo ${photo.original_filename}: ${message.slice(0, 300)}`);
+    }
   }
 
-  await recordSync(projectId, itemId, remoteId, remoteUrl, mediaMap, 'ok', null);
+  await recordSync(projectId, itemId, remoteId, remoteUrl, mediaMap, mediaError ? 'warning' : 'ok', mediaError);
   return { item_id: itemId, remote_id: remoteId, remote_url: remoteUrl, action, media_attached: attached, warnings };
 }
 
