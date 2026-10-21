@@ -484,3 +484,83 @@ with a stub engine + both tesseract output shapes, and a REAL smoke
 test OCRs a rendered "HELLO VAULT" image through the self-hosted
 core/lang assets in ~1.2 s (`test/transcriptions.test.mjs`). Failed
 OCR throws and creates NO transcription — never a fake empty result.
+
+---
+
+## 10. serwist@9.5.13 + @serwist/next@9.5.13 + @serwist/cli@9.5.13 — PWA / offline shell (Wave E)
+
+**Status:** ACCEPTED · landed 2026-10-21
+
+**Why:** Wave E needs an installable, offline-capable PWA under the
+BINDING cache taxonomy of APPSEC-REVIEW-PWA.md (26 conditions).
+Serwist (the maintained Workbox successor) generates `/sw.js` from an
+explicit SW source (`app/sw.ts`) the builder writes and reviews; the
+effective runtime route table is dumped from the built SW in the wave
+report, never assumed from library defaults (E-SEC-15).
+
+**Build integration — configurator mode (decision + why):** this repo
+builds with **Turbopack** (Next 16's default; the build output carries
+the Turbopack marker). `@serwist/next` is webpack-only — wiring it in
+produced NO `public/sw.js` and the plugin's own warning: *"You are
+using '@serwist/next' with Turbopack… Migrate to '@serwist/turbopack'
+… or configurator mode."* The `@serwist/turbopack` route-handler
+variant was evaluated and **rejected** for this app: it can only serve
+the SW from a dynamic `[path]` segment (a root segment would collide
+with `/[projectId]`), and its GET unconditionally sets a
+scope-widening `Service-Worker-Allowed: /` header, which E-SEC-11
+forbids. **Configurator mode** (`serwist.config.mjs` +
+`serwist build` chained after `next build` in the `build` script)
+compiles the same `app/sw.ts` with esbuild to a real static
+`public/sw.js` at scope `/` — no extra app routes, no extra response
+headers, and the precache manifest is computed from the FINISHED
+build. `@serwist/next` stays installed (the vetted integration line;
+its peer `@serwist/cli` is the build tool); `esbuild@0.27.2` is the
+CLI's bundler (devDependency).
+
+**Verification (pulled 2026-10-21):**
+
+- **Versions:** all three packages pinned `--save-exact` at 9.5.13
+  (npm registry `latest` stable line; 10.x is preview-only)
+- **Licenses (exact):** MIT for `serwist`, `@serwist/next`,
+  `@serwist/cli`, `@serwist/build`, `esbuild`
+- **License gate:** `node scripts/check-licences.mjs` PASS after
+  install — no GPL/AGPL/SSPL anywhere in the new subtree; only the
+  four pre-existing LGPL warnings (unchanged)
+- **postinstall scripts:** none in the Serwist packages; `esbuild`
+  ships a platform binary via optionalDependencies (its install
+  script validates/links it — standard, sandboxed to its own dir)
+
+**`defaultCache` REJECTED (recorded per the wave brief):** Serwist's
+shipped `defaultCache` preset (`@serwist/next/worker`) includes a
+NetworkFirst runtime rule for `/api/` GETs and a network-first pages
+rule that caches document responses. Adopting it unpruned violates
+E-SEC-1 (`/api/**` is network-only, absolutely) and E-SEC-5
+(documents are network-first with a cache fallback ONLY on fetch
+rejection, and only the two data-free shells). The SW therefore uses
+`runtimeCaching: []` plus a hand-written fetch listener driven by the
+pure, unit-tested route table in `lib/pwa/routing.ts`: exclusions
+first (`/api/**`, cross-origin presigned R2, `/_vercel/**`, `/sw.js`,
+non-GET/HEAD, Range — all bypass), navigations network-first with
+verbatim pass-through, OCR assets lazy cache-first in a versioned
+cache (`ezvault-ocr-tess<version>-<build>`), shell documents cached
+at install behind the E-SEC-6 response guard (an auth-shaped response
+fails the install). The built `public/sw.js` contains no
+`defaultCache` remnant (asserted by `test/pwa-offline.test.mjs`).
+
+**Bundle delta (measured):** `/[projectId]` First Load JS
+**215.03 → 217.14 KB gzip (+2.11 KB)** by the canonical method — the
+root-layout `PwaProvider` (registration, banner/session/update state)
++ the connectivity machine wired into `lib/api/client.ts`. Far under
+the 40 KB/route rule. No ADR needed. The generated SW itself
+(`public/sw.js`, 39,199 B) is NOT route JS: browsers fetch it as the
+service-worker script. **Precache: 42 entries, 3,742,975 B ≈ 3.57 MiB
+on disk (3.74 MB as reported by the Serwist build)** — under the
+E-SEC-24 hard cap of 10 MiB; OCR's ~10.5 MiB is runtime-cached lazily
+under its own 12 MiB cap, never precached.
+
+**Gap closed:** installability (manifest + original glyph icons from
+the VaultMark geometry, `scripts/generate-pwa-icons.mjs`), the honest
+offline UX of E-SEC-19…22 (banner semantics, client-layer mutation
+block with NO queue/replay, no false empty states, session-expiry
+detection with document-cache purge), and immediate-activation
+updates with a loop-guarded one-time reload (E-SEC-13/14).

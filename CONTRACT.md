@@ -435,3 +435,46 @@ Types: `StorageCompressRequest`, `StorageCompressResponse`,
   (B1/B2 + findings 3/4/5/6): all changes are server-side (proxy,
   fetch guard, Omeka/IIIF services) — First Load JS re-measured
   **215.03 KB gzip (11 files, 0 missing), delta +0.00 KB**.
+
+## Wave E (part 1) — PWA / offline shell (Serwist)
+
+- Binding spec: APPSEC-REVIEW-PWA.md (26 conditions, E-SEC-1…26).
+  Integration record: INTEGRATION-DECISIONS.md #10 (incl. the
+  Turbopack/configurator-mode build decision and the `defaultCache`
+  rejection).
+- Build: `npm run build` = `next build && serwist build
+  serwist.config.mjs` → `public/sw.js` (gitignored build artifact).
+  The SW source is `app/sw.ts`; its runtime route table is the pure
+  module `lib/pwa/routing.ts` (unit-tested in
+  `test/pwa-routing.test.mjs`): exclusions first (`/api/**`,
+  cross-origin, `/_vercel/**`, `/sw.js`, non-GET/HEAD, Range — never
+  intercepted), navigations network-first with verbatim pass-through
+  and cached-shell fallback ONLY on fetch rejection, OCR assets lazy
+  cache-first in `ezvault-ocr-tess<ver>-<build>`, shell documents
+  (`/` + the representative `/pwa-project-shell` render of
+  `/[projectId]`) cached at install in `ezvault-documents-<build>`
+  behind the E-SEC-6 guard (auth-shaped response = failed install).
+  Serwist precaches ONLY static build assets + public SVGs + PWA
+  icons + the manifest (42 entries, 3.74 MB — cap 10 MiB).
+- Client: `components/pwa/PwaProvider.tsx` (root layout) registers the
+  SW in production only, renders the offline banner / update banner /
+  session-expired overlay, and drives recovery (banner clears only
+  after a successful /api response + full SWR revalidation).
+  `lib/api/client.ts` is the mutation gate: while the offline or
+  session-expired state is active, mutations throw
+  `OfflineBlockedError` BEFORE any fetch — no queue, no replay
+  (E-SEC-17/20). Auth-shaped API failures (redirect off-origin, HTML
+  body, 401/403) raise the session-expired state and purge the
+  document caches (E-SEC-9/10). `WorkspaceClient` treats the URL as
+  the authority for the project id (the one cached project shell is
+  generic). False empty states are banned offline (E-SEC-19):
+  `OfflineUnavailable` replaces them in the center panel, search
+  results, project home, and the palette's search section.
+- Copy: `app.offlineNote` rewritten per E-SEC-22 — the library lives
+  online and can't be loaded or changed offline; the shell opens and
+  OCR still runs on photos already on screen. No copy anywhere claims
+  the library is available offline. `proxy.ts` diff is exactly the
+  E-SEC-7 `Cache-Control: no-cache` complement for `/sw.js`.
+- Bundle: workspace First Load JS **215.03 → 217.14 KB gzip
+  (+2.11 KB)** (canonical method, 10 files, 0 missing). The generated
+  SW (39,199 B) is not route JS.
