@@ -412,7 +412,8 @@ export async function processPhoto(input: ProcessPhotoInput): Promise<ProcessedP
     bumpCountersQuery(projectId, { originals: sizeBytes, thumbs: thumbSize }),
     q(
       `UPDATE photos SET r2_key = $2, thumb_r2_key = $3, width = $4, height = $5,
-              size_bytes = $6, exif = $7::jsonb, mimetype = $8, density = $9
+              size_bytes = $6, exif = $7::jsonb, mimetype = $8, density = $9,
+              missing_original = false
        WHERE subject_id = $1`,
       [photoSubjectId, r2Key, thumbKey, width, height, sizeBytes, JSON.stringify(exif), mimetype,
         // Wave B1: record the density actually rendered at for the formats
