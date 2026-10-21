@@ -159,6 +159,25 @@ export function ExportIcon({ size = 16, ...props }: IconProps) {
   ));
 }
 
+export function CopyIcon({ size = 16, ...props }: IconProps) {
+  return base(size, props, (
+    <>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V6a2 2 0 0 1 2-2h9" />
+    </>
+  ));
+}
+
+export function PrintIcon({ size = 16, ...props }: IconProps) {
+  return base(size, props, (
+    <>
+      <path d="M7 8V4h10v4" />
+      <rect x="4" y="8" width="16" height="8" rx="2" />
+      <path d="M7 13h10v7H7z" />
+    </>
+  ));
+}
+
 export function CloseIcon({ size = 16, ...props }: IconProps) {
   return base(size, props, (
     <>

@@ -28,9 +28,11 @@ import {
   runCommand,
   trashSubjectsOp,
   attachTagsOp,
+  mergeItemsOp,
   reorderListItemsOp,
   type OpContext,
 } from "@/lib/commands/ops";
+import { Dialog } from "@/components/ui/Dialog";
 import { useOpContext } from "@/components/sidebar/Sidebar";
 import { startTour } from "@/lib/tour/launcher";
 import { Menu, MenuItem, MenuLabel } from "@/components/ui/Menu";
@@ -587,6 +589,7 @@ function ItemTable({ items, projectId, label }: { items: Item[]; projectId: stri
 
 function SelectionToolbar({
   projectId,
+  items,
   ctx,
 }: {
   projectId: string;
@@ -595,6 +598,7 @@ function SelectionToolbar({
 }) {
   const t = useTranslations("center");
   const td = useTranslations("dialogs");
+  const ta = useTranslations("app");
   const selectedIds = useUiStore((s) => s.selectedIds);
   const setSelectedIds = useUiStore((s) => s.setSelectedIds);
   const setInspectorTab = useUiStore((s) => s.setInspectorTab);
@@ -603,10 +607,27 @@ function SelectionToolbar({
   const { data: lists } = useLists(projectId);
   const tags = tagListOf(tagsData);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number; kind: "tags" | "lists" } | null>(null);
+  const [mergeConfirm, setMergeConfirm] = useState(false);
+
+  // The first selected item is the merge survivor (same rule as mod+shift+m).
+  const mergeTarget = items.find((i) => i.id === selectedIds[0]);
 
   async function trashSelected() {
     await runCommand(ctx, trashSubjectsOp(ctx, selectedIds, "user", t("trashItems")), ["items", "trash", "meter"]);
     setSelectedIds([]);
+  }
+
+  async function mergeSelected() {
+    if (!mergeTarget) return;
+    const sources = selectedIds.filter((id) => id !== mergeTarget.id);
+    const ok = await runCommand(ctx, mergeItemsOp(ctx, sources, mergeTarget.id), ["items", "trash", "meter"]);
+    setMergeConfirm(false);
+    if (ok) setSelectedIds([mergeTarget.id]);
+  }
+
+  function exportSelection(kind: "csv" | "zip") {
+    const qs = new URLSearchParams({ itemIds: selectedIds.join(",") });
+    window.location.href = `/api/projects/${projectId}/export/${kind}?${qs.toString()}`;
   }
 
   return (
@@ -618,11 +639,21 @@ function SelectionToolbar({
         {t("deselect")}
       </button>
       {selectedIds.length >= 2 ? (
-        // Wave-2 feature: visibly gated, never a functional-looking dialog.
-        <button type="button" className="ez-btn ez-btn--sm" disabled title={t("mergeWave2Hint")}>
-          {t("mergeWave2")}
+        <button
+          type="button"
+          className="ez-btn ez-btn--sm"
+          title={t("mergeHint")}
+          onClick={() => setMergeConfirm(true)}
+        >
+          {t("merge")}
         </button>
       ) : null}
+      <button type="button" className="ez-btn ez-btn--sm" onClick={() => exportSelection("csv")}>
+        {t("exportCsv")}
+      </button>
+      <button type="button" className="ez-btn ez-btn--sm" onClick={() => exportSelection("zip")}>
+        {t("exportZip")}
+      </button>
       <button
         type="button"
         className="ez-btn ez-btn--sm"
@@ -695,6 +726,26 @@ function SelectionToolbar({
             </MenuItem>
           ))}
         </Menu>
+      ) : null}
+      {mergeConfirm && mergeTarget ? (
+        <Dialog
+          title={t("mergeTitle", { count: selectedIds.length })}
+          onClose={() => setMergeConfirm(false)}
+          footer={
+            <>
+              <button type="button" className="ez-btn" onClick={() => setMergeConfirm(false)}>
+                {ta("cancel")}
+              </button>
+              <button type="button" className="ez-btn ez-btn--primary" onClick={mergeSelected}>
+                {t("merge")}
+              </button>
+            </>
+          }
+        >
+          <p style={{ fontSize: 13, color: "var(--ink-2)", margin: 0 }}>
+            {t("mergeBody", { title: mergeTarget.title || "Untitled" })}
+          </p>
+        </Dialog>
       ) : null}
     </div>
   );

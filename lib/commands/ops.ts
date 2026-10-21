@@ -301,21 +301,26 @@ export function mergeItemsOp(
   itemIds: string[],
   targetId: string,
 ): Command {
-  // Wave-2 placeholder: merge needs photo reassignment, which the landed
-  // routes do not offer (photo PATCH has no item_id; bulk has no merge op).
-  // The UI is gated until then (disabled "Merge items (wave 2)" button —
-  // QA round 1): this op exists only so wave 2 has the seam. It changes
-  // nothing and says so honestly instead of promising something pending.
-  void itemIds;
-  void targetId;
-  return makeCommand("Merge items", "items", async (opId) => {
-    ctx.toast(
-      "Merging items ships in wave 2 — the backend merge endpoint (photo reassignment) does not exist yet. Nothing was changed.",
-      "error",
-    );
-  }, async (opId) => {
-    /* nothing was done — nothing to undo */
-  });
+  // Wave B2 (row 32): real merge. POST /items/merge runs the whole merge
+  // in one transaction and stores its inverse in command_log under the
+  // DO op id; undo posts that same id to /items/merge/undo. The command
+  // is built by hand (not makeCommand) because undo needs the do-op-id,
+  // not a fresh one. Redo re-runs do() with the same id — the server sees
+  // the undone log row and re-applies the merge (see lib/items/merge.ts).
+  const doOpId = newClientOpId();
+  const url = `/api/projects/${ctx.projectId}/items/merge`;
+  return {
+    id: doOpId,
+    label: "Merge items",
+    scope: "items",
+    at: Date.now(),
+    do: async () => {
+      await post(url, { target_id: targetId, source_ids: itemIds, clientOpId: doOpId }, { opId: doOpId });
+    },
+    undo: async () => {
+      await post(`${url}/undo`, { clientOpId: doOpId }, { opId: newClientOpId() });
+    },
+  };
 }
 
 // ---------- Metadata (before-image snapshots) ----------

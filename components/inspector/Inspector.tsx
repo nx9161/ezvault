@@ -4,15 +4,17 @@
 
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useUiStore } from "@/lib/store/ui";
-import { usePhotos, useSelections, useItem, thumbUrl } from "@/lib/api/hooks";
+import { usePhotos, useSelections, useItem, useProjects, thumbUrl } from "@/lib/api/hooks";
 import { editsDirty } from "@/lib/api/types";
+import { post } from "@/lib/api/client";
 import { runCommand, trashSubjectsOp } from "@/lib/commands/ops";
 import { useOpContext } from "@/components/sidebar/Sidebar";
 import { ErrorCard, SkeletonRows } from "@/components/ui/Feedback";
-import { ExportIcon, TrashIcon, CloseIcon } from "@/components/ui/icons";
+import { Menu, MenuItem, MenuLabel } from "@/components/ui/Menu";
+import { ExportIcon, TrashIcon, CloseIcon, CopyIcon } from "@/components/ui/icons";
 import { EmptyArt } from "@/components/ui/EmptyArt";
 import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
 import PhotoViewer from "./PhotoViewer";
@@ -97,6 +99,19 @@ function SingleItemInspector({ projectId, itemId }: { projectId: string; itemId:
   const { data: photosData, error: photosError, isLoading: photosLoading, mutate: mutatePhotos } = usePhotos(projectId, itemId);
   const photos = photosData?.items ?? [];
   const { data: item } = useItem(projectId, itemId);
+  const { data: projectsData } = useProjects();
+  const projects = (Array.isArray(projectsData) ? projectsData : projectsData?.items ?? [])
+    .filter((p) => p.id !== projectId);
+  const [copyMenuAt, setCopyMenuAt] = useState<{ x: number; y: number } | null>(null);
+
+  async function copyToProject(targetProjectId: string, targetName: string) {
+    try {
+      await post(`/api/projects/${projectId}/items/${itemId}/copy`, { target_project_id: targetProjectId });
+      ctx.toast(t("copyDone", { project: targetName }));
+    } catch (err) {
+      ctx.toast(err instanceof Error ? err.message : t("copyFailed"), "error");
+    }
+  }
   const photo = useMemo(() => {
     if (photos.length === 0) return null;
     return photos.find((p) => p.id === activePhotoId) ?? photos[0];
@@ -161,6 +176,18 @@ function SingleItemInspector({ projectId, itemId }: { projectId: string; itemId:
           <button
             type="button"
             className="ez-icon-btn"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setCopyMenuAt({ x: r.left, y: r.bottom + 6 });
+            }}
+            aria-label={t("copyToProject")}
+            title={t("copyToProject")}
+          >
+            <CopyIcon size={15} />
+          </button>
+          <button
+            type="button"
+            className="ez-icon-btn"
             onClick={async () => {
               await runCommand(ctx, trashSubjectsOp(ctx, [itemId], "user", t("trashItem")), ["items", "trash", "meter"]);
               setActiveItemId(null);
@@ -197,6 +224,20 @@ function SingleItemInspector({ projectId, itemId }: { projectId: string; itemId:
           ))}
         </div>
       </div>
+      {copyMenuAt ? (
+        <Menu anchor={copyMenuAt} onClose={() => setCopyMenuAt(null)} label={t("copyToProject")}>
+          <MenuLabel>{t("copyToProject")}</MenuLabel>
+          {projects.length === 0 ? (
+            <MenuItem onSelect={() => undefined}>{t("copyNoProjects")}</MenuItem>
+          ) : (
+            projects.map((p) => (
+              <MenuItem key={p.id} onSelect={() => void copyToProject(p.id, p.name)}>
+                {p.name}
+              </MenuItem>
+            ))
+          )}
+        </Menu>
+      ) : null}
       <div className="ez-inspector-body">
         {inspectorTab === "viewer" ? (
           <>
