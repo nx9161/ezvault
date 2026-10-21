@@ -68,6 +68,8 @@ export const key = {
     `/api/projects/${id}/photos/${photoId}/transcriptions`,
   selectionNotes: (id: string, selId: string) =>
     `/api/projects/${id}/selections/${selId}/notes`,
+  itemNotes: (id: string, itemId: string) =>
+    `/api/projects/${id}/items/${itemId}/notes`,
   metadata: (id: string, subjectId: string) =>
     `/api/projects/${id}/subjects/${subjectId}/metadata`,
   tags: (id: string) => `/api/projects/${id}/tags`,
@@ -173,19 +175,20 @@ export function useSelections(projectId: string | null, photoId: string | null) 
   );
 }
 
-export type NoteSubjectKind = "photo" | "selection";
+export type NoteSubjectKind = "photo" | "selection" | "item";
 
 export function noteKey(
   projectId: string,
   subjectId: string,
   kind: NoteSubjectKind,
 ): string {
-  return kind === "photo"
-    ? key.photoNotes(projectId, subjectId)
-    : key.selectionNotes(projectId, subjectId);
+  if (kind === "photo") return key.photoNotes(projectId, subjectId);
+  if (kind === "item") return key.itemNotes(projectId, subjectId);
+  return key.selectionNotes(projectId, subjectId);
 }
 
-/** Notes attach to photos and selections (no item-level notes in v1). */
+/** Notes attach to photos, selections and items. (Item notes gained a
+ *  route in the 2026-10-21 sweep; the v1 surface was photo/selection only.) */
 export function useNotes(
   projectId: string | null,
   subjectId: string | null,

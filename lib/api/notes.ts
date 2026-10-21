@@ -89,6 +89,7 @@ export async function createNote(projectId: string, subjectId: string, req: Requ
 
 type PhotoCtx = { params: Promise<{ id: string; photoId: string }> };
 type SelCtx = { params: Promise<{ id: string; selectionId: string }> };
+type ItemCtx = { params: Promise<{ id: string; itemId: string }> };
 
 export function photoNotesRoute() {
   return {
@@ -128,6 +129,31 @@ export function selectionNotesRoute() {
       const { id, selectionId } = await ctx.params;
       await requireProject(id);
       return createNote(id, selectionId, req);
+    }),
+  };
+}
+
+/**
+ * Item notes (sweep completion, 2026-10-21): the notes table + service are
+ * subject-generic and item notes already exist as data (item merge moves
+ * them; IIIF harvest writes them), but no route could create/list them —
+ * the v1 surface stopped at photos + selections. Same handlers, item ctx.
+ */
+export function itemNotesRoute() {
+  return {
+    GET: handle(async (req: Request, ctx: ItemCtx) => {
+      const { enforceTokenScope } = await import('@/lib/token-auth');
+      await enforceTokenScope(req, 'read');
+      const { id, itemId } = await ctx.params;
+      await requireProject(id);
+      return listNotes(id, itemId, new URL(req.url));
+    }),
+    POST: handle(async (req: Request, ctx: ItemCtx) => {
+      const { enforceTokenScope } = await import('@/lib/token-auth');
+      await enforceTokenScope(req, 'notes:write');
+      const { id, itemId } = await ctx.params;
+      await requireProject(id);
+      return createNote(id, itemId, req);
     }),
   };
 }
