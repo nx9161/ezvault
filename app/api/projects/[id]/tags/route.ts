@@ -16,7 +16,7 @@ export const GET = handle(async (req: Request, ctx: Ctx) => {
   // A2: one grouped pass instead of a correlated count subquery per tag.
   // The subjects join preserves the old same-project count semantics
   // (taggings reference subjects; cross-project taggings are not counted).
-  const rows = await sql()`SELECT t.id, t.name, t.color,
+  const rows = await sql()`SELECT t.id, t.project_id, t.name, t.color,
       COUNT(s.id)::int AS subject_count
     FROM tags t
     LEFT JOIN taggings tg ON tg.tag_id = t.id

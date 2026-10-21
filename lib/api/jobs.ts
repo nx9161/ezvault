@@ -28,6 +28,11 @@ export interface JobState {
   done: number;
   failed: number;
   checkpoint: Record<string, unknown>;
+  /** Per-row import report (import_jobs.report); null until the job writes one.
+   * The client hook types this payload as ImportJob, which promises the
+   * field — omitting it left `job.report` undefined at runtime and forced
+   * a defensive `?? {}` workaround in the .tpy wizard. */
+  report: Record<string, unknown> | null;
   cpu_seconds: number;
   subjects_imported: number;
   /** Failure reason; null when the job has not failed. Renders in the UI. */
@@ -57,6 +62,7 @@ export async function getJobState(jobId: string): Promise<JobState> {
     done: Number(j['done']),
     failed: Number(j['failed']),
     checkpoint: (j['checkpoint'] as Record<string, unknown> | null) ?? {},
+    report: (j['report'] as Record<string, unknown> | null) ?? null,
     cpu_seconds: Number(j['cpu_seconds'] ?? 0),
     subjects_imported: Number((subjectCount[0] as Record<string, unknown>)['c'] ?? 0),
     error: (j['error'] as string | null) ?? null,
