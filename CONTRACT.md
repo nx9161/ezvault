@@ -228,3 +228,77 @@ Types: `StorageCompressRequest`, `StorageCompressResponse`,
   `@media print` block of `app/globals.css` (`@page` margins, chrome
   hidden). Honest limit: the grid is virtualized, so the contact sheet
   covers the items currently loaded in the view.
+
+## Wave C — Transcriptions, OCR, transcription search (rows 13/14 + 19 remainder)
+
+- Schema (migration `0010_transcriptions_search.sql`): word boxes live
+  in dedicated columns — `transcriptions.words` (JSONB array of
+  `{text,x,y,w,h,confidence?}` in page coordinates), `page_width` /
+  `page_height` (the coordinate space: ALTO `<Page>` size, or photo
+  pixels for OCR/manual) — NOT inside `config`, which is provenance
+  only. The migration also adds `created_at`/`updated_at` (stable list
+  order) and the `doc_transcriptions` search scope (below).
+- Addressing: transcriptions hang off `images` (`image_id` FK); the API
+  is photo-addressed and resolves photo subject → `photos.image_id`
+  (project-scoped) server-side (`lib/api/transcriptions.ts`).
+- Routes:
+  - `GET|POST /api/projects/[id]/photos/[photoId]/transcriptions` —
+    list (paginated, `{items,total}`) / create. Create body:
+    `{text, config?, status?, angle?, mirror?, words?, page_width?,
+    page_height?, clientOpId?}` → 201 + the row (+`rev`). Provenance:
+    `config.source` defaults to `'manual'`; an explicit source (the OCR
+    client sends `'ocr'`) is preserved. Create is idempotent via
+    `clientOpId` (notes pattern). `page_width/height` default to the
+    photo's pixel size.
+  - `POST /api/projects/[id]/photos/[photoId]/transcriptions/alto`
+    `{xml}` (B11 caps) — parses ALTO (`lib/transcription/alto.ts`, the
+    repo's `sax` approach), stores the ORIGINAL XML in R2 at
+    `keys.transcription(projectId, id)`, creates the row with
+    `config = {source:'alto', alto:{namespace, version}}`; parse
+    failure = 400 with NO row and NO stored object; insert failure
+    deletes the stored object.
+  - `GET|PATCH|DELETE /api/projects/[id]/transcriptions/[tid]` — PATCH
+    accepts the create fields (partial); DELETE is a soft delete
+    (`deleted_at`); reads exclude soft-deleted rows.
+  - `GET /api/projects/[id]/transcriptions/[tid]/alto` — 302 to a
+    presigned download of the stored ALTO XML (404 when none stored).
+  - `GET /api/projects/[id]/transcriptions/[tid]/text` — plain-text
+    download straight from the row.
+- angle/mirror semantics (binding): they describe the WORD-BOX space
+  relative to the stored image — `0`/`false` = boxes in stored-image
+  coordinates (the normal ALTO/OCR case; the create default). A producer
+  that recognized a rotated/flipped rendering records that orientation;
+  the viewer inverts it before applying the photo's display transform.
+  They are NOT a snapshot of the photo's edit params.
+- Viewer text layer: the most recent transcription WITH word boxes
+  renders as transparent selectable spans over the photo in
+  `PhotoViewer` (`.ez-text-layer`), positioned page → photo pixels →
+  transcription-space correction → the viewer's fit/rotate/mirror
+  transform. Without boxes there is no overlay; the Transcription
+  panel's text (Inspector, viewer tab) is the selectable surface.
+- OCR (row 14): adapter contract in `lib/ocr/adapter.ts` (`OcrEngine`:
+  `id`, `version`, `languages`, `recognize(image, {lang, onProgress})`
+  → `{text, words[]}` in image pixel coordinates; confidences stored
+  0..1). One real engine: Tesseract.js 7.0.0, client-side worker,
+  self-hosted assets under `public/ocr/` (CSP decision +
+  sizes in INTEGRATION-DECISIONS.md #9), dynamic-imported on first Run
+  OCR only. OCR runs on the photo's thumbnail and scales word boxes
+  into photo pixel space; the result lands as a normal transcription
+  (`config = {source:'ocr', engine:'tesseract', version, lang}`),
+  editable like any other. OCR failure throws and creates NOTHING.
+  Bundled language data: `eng` only; other picker codes fail honestly.
+- Search (row 19 closed): `refresh_search_document()` aggregates
+  `transcriptions.text` into `doc_transcriptions` for BOTH owning
+  scopes (the photo subject and its parent item), `doctext` included;
+  the broken 0001 trigger (it referenced a nonexistent `subject_id`
+  column on transcriptions) is replaced by an image-mapping trigger.
+  Search route scope gains `transcriptions`; `scope=all` is the 4-way
+  vector concatenation (expression GIN index rebuilt to match).
+- Bundle: workspace First Load JS **211.93 → 213.67 KB gzip (+1.74 KB)**
+  (canonical method, INTEGRATION-DECISIONS.md) — the transcription
+  panel + text layer only; all OCR code/assets are on-demand. No ADR
+  needed.
+- Known limits: multi-page ALTO documents use the FIRST `<Page>`'s
+  geometry (words from later pages are kept in reading order but share
+  page 1's coordinate space); copy-to-project still does not copy
+  transcriptions (unchanged from Wave B2).
