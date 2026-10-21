@@ -3,6 +3,8 @@ import { handle, ok, parseJson, requireProject, HttpError } from '@/lib/api/rout
 import { pushItemToOmeka } from '@/lib/omeka/service';
 import { OmekaError } from '@/lib/omeka/client';
 import { sql } from '@/lib/db/index';
+import { requirePluginEnabled } from '@/lib/plugins/server';
+
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -18,6 +20,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export const POST = handle(async (req: Request, ctx: Ctx) => {
   const { id } = await ctx.params;
   await requireProject(id);
+  await requirePluginEnabled(id, 'omeka-push');
   const body = await parseJson<{ item_id?: string }>(req);
   if (!body.item_id) throw new HttpError(400, 'validation', 'item_id is required');
   try {

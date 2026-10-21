@@ -2,6 +2,8 @@
 import { handle, ok, requireProject, HttpError } from '@/lib/api/route-utils';
 import { pushProjectToOmeka } from '@/lib/omeka/service';
 import { OmekaError } from '@/lib/omeka/client';
+import { requirePluginEnabled } from '@/lib/plugins/server';
+
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -17,6 +19,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export const POST = handle(async (_req: Request, ctx: Ctx) => {
   const { id } = await ctx.params;
   await requireProject(id);
+  await requirePluginEnabled(id, 'omeka-push');
   try {
     const result = await pushProjectToOmeka(id);
     return ok(result);

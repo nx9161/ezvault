@@ -11,6 +11,7 @@ import 'server-only';
  */
 
 import { handle, ok, parseJson, parseCappedJson, pagination, nextCursor, requireProject, HttpError } from '@/lib/api/route-utils';
+import { requirePluginEnabled } from '@/lib/plugins/server';
 import { sql, tx, bumpRevQuery, queryRaw } from '@/lib/db/index';
 import { getStorageDriver, keys } from '@/lib/storage/driver';
 import { idempotentCreate, readStashedResult, resolveClientOpId } from '@/lib/api/idempotency';
@@ -244,6 +245,9 @@ export function photoTranscriptionsRoute() {
       // Provenance: manual by default; an explicit config.source (the OCR
       // client sends source:'ocr' + engine fields) is preserved.
       if (typeof v.config['source'] !== 'string') v.config = { ...v.config, source: 'manual' };
+      // Plugin gate (Wave E part 2): OCR results land through this
+      // create; with the tesseract-ocr extension off they are refused.
+      if (v.config['source'] === 'ocr') await requirePluginEnabled(id, 'tesseract-ocr');
       // OCR/manual word boxes are in photo pixel space unless the caller
       // says otherwise.
       if (v.page_width === undefined) v.page_width = ref.width;
@@ -260,6 +264,7 @@ export function photoAltoImportRoute() {
     POST: handle(async (req: Request, ctx: PhotoCtx) => {
       const { id, photoId } = await ctx.params;
       await requireProject(id);
+      await requirePluginEnabled(id, 'alto-import');
       const ref = await requirePhotoImage(id, photoId);
       const body = await parseCappedJson<{ xml?: unknown; clientOpId?: string }>(req);
       if (typeof body.xml !== 'string' || !body.xml.trim()) {

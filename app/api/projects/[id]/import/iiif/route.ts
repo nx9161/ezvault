@@ -2,6 +2,8 @@
 import { handle, ok, parseJson, requireProject, HttpError } from '@/lib/api/route-utils';
 import { importIiifManifest } from '@/lib/iiif/import';
 import { requireRateLimit } from '@/lib/ratelimit';
+import { requirePluginEnabled } from '@/lib/plugins/server';
+
 import { checkCpuGuard } from '@/lib/cpu-budget';
 import { sql } from '@/lib/db/index';
 
@@ -22,6 +24,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export const POST = handle(async (req: Request, ctx: Ctx) => {
   const { id } = await ctx.params;
   await requireProject(id);
+  await requirePluginEnabled(id, 'iiif-import');
   await requireRateLimit('import:jsonld');
   await checkCpuGuard();
   const body = await parseJson<{ manifest_url?: string; template_id?: string | null }>(req);

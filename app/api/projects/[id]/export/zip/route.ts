@@ -7,6 +7,8 @@ import { resolveItemTitles } from '@/lib/api/item-enrichment';
 import { createZipStream, storageChunks, bytesChunks, zipSegment } from '@/lib/export/zip-stream';
 import type { ZipSourceFile } from '@/lib/export/zip-stream';
 import { requireRateLimit } from '@/lib/ratelimit';
+import { requirePluginEnabled } from '@/lib/plugins/server';
+
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -30,6 +32,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export const GET = handle(async (req: Request, ctx: Ctx) => {
   const { id } = await ctx.params;
   const project = await requireProject(id);
+  await requirePluginEnabled(id, 'archive-export');
   await requireRateLimit('export:jsonld');
 
   const url = new URL(req.url);
