@@ -1,4 +1,14 @@
 /* SPDX-License-Identifier: MIT */
+/* Astryx stylesheets, in the documented layer order (reset → component
+   base → theme tokens). These @imports must precede every other rule:
+   CSS requires @import at the top of the file, and the Astryx cascade
+   layers sit below EZVault's own unlayered rules, so existing EZVault
+   surfaces keep their current styling while Astryx components render
+   with the EZVault theme (lib/theme/ezvault-theme.ts). */
+@import "@astryxdesign/core/reset.css";
+@import "@astryxdesign/core/astryx.css";
+@import "@astryxdesign/theme-neutral/theme.css";
+
 /* EZVault design tokens — EZVault identity. Light = "Reading Room", dark = "Darkroom". */
 
 :root {

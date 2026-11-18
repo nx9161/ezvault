@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages, getTranslations } from "next-intl/server";
 import PwaProvider from "@/components/pwa/PwaProvider";
+import { AstryxProviders } from "@/components/astryx/AstryxProviders";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -58,7 +59,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           {t("skipToInspector")}
         </a>
         <NextIntlClientProvider messages={messages} locale={locale}>
-          <PwaProvider>{children}</PwaProvider>
+          <AstryxProviders>
+            <PwaProvider>{children}</PwaProvider>
+          </AstryxProviders>
         </NextIntlClientProvider>
       </body>
     </html>

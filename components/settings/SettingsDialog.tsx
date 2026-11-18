@@ -13,6 +13,11 @@ import { patch, del, get, post, api } from "@/lib/api/client";
 import { mutate } from "swr";
 import { useRouter } from "next/navigation";
 import { Dialog, ConfirmDialog } from "@/components/ui/Dialog";
+import { Button } from "@astryxdesign/core/Button";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { NumberInput } from "@astryxdesign/core/NumberInput";
+import { Selector } from "@astryxdesign/core/Selector";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { DeleteEverythingDialog } from "@/components/settings/DeleteEverythingDialog";
 import { ErrorCard } from "@/components/ui/Feedback";
 
@@ -181,16 +186,10 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
       onClose={() => setOpen(false)}
       footer={
         <>
-          <button type="button" className="ez-btn ez-btn--danger" onClick={() => setConfirmDelete(true)}>
-            {t("deleteProject")}
-          </button>
+          <Button label={t("deleteProject")} variant="destructive" onClick={() => setConfirmDelete(true)} />
           <span style={{ flex: 1 }} />
-          <button type="button" className="ez-btn" onClick={() => setOpen(false)}>
-            {ta("cancel")}
-          </button>
-          <button type="button" className="ez-btn ez-btn--primary" disabled={saving || !name.trim()} onClick={save}>
-            {t("save")}
-          </button>
+          <Button label={ta("cancel")} onClick={() => setOpen(false)} />
+          <Button label={t("save")} variant="primary" isDisabled={saving || !name.trim()} isLoading={saving} onClick={save} />
         </>
       }
     >
@@ -201,133 +200,78 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
       ) : (
         <>
           <div className="ez-field">
-            <label htmlFor="ez-settings-name">{t("name")}</label>
-            <input
-              id="ez-settings-name"
-              className="ez-input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
+            <TextInput label={t("name")} value={name} onChange={(v) => setName(v)} />
+          </div>
+          <div className="ez-field">
+            <Selector
+              label={t("defaultTemplate")}
+              value={defaultTemplate}
+              onChange={(v) => setDefaultTemplate(v)}
+              options={[
+                { value: "", label: "—" },
+                ...(templates ?? []).map((tp) => ({ value: tp.id, label: tp.name })),
+              ]}
             />
           </div>
           <div className="ez-field">
-            <label htmlFor="ez-settings-template">{t("defaultTemplate")}</label>
-            <select
-              id="ez-settings-template"
-              className="ez-select"
-              value={defaultTemplate}
-              onChange={(e) => setDefaultTemplate(e.target.value)}
-            >
-              <option value="">—</option>
-              {(templates ?? []).map((tp) => (
-                <option key={tp.id} value={tp.id}>
-                  {tp.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="ez-field">
-            <label htmlFor="ez-settings-dupe">{t("duplicatePolicy")}</label>
-            <select
-              id="ez-settings-dupe"
-              className="ez-select"
+            <Selector
+              label={t("duplicatePolicy")}
               value={duplicatePolicy}
-              onChange={(e) => setDuplicatePolicy(e.target.value)}
-            >
-              <option value="skip">{ti("policySkip")}</option>
-              <option value="keep_both">{ti("policyKeepBoth")}</option>
-              <option value="ask">{ti("policyAsk")}</option>
-            </select>
+              onChange={(v) => setDuplicatePolicy(v)}
+              options={[
+                { value: "skip", label: ti("policySkip") },
+                { value: "keep_both", label: ti("policyKeepBoth") },
+                { value: "ask", label: ti("policyAsk") },
+              ]}
+            />
           </div>
           <div className="ez-field">
-            <label htmlFor="ez-settings-notes">{t("notesFormat")}</label>
-            <select
-              id="ez-settings-notes"
-              className="ez-select"
+            <Selector
+              label={t("notesFormat")}
               value={notesFormat}
-              onChange={(e) => setNotesFormat(e.target.value)}
-            >
-              <option value="html">{t("notesHtml")}</option>
-              <option value="markdown">{t("notesMarkdown")}</option>
-            </select>
+              onChange={(v) => setNotesFormat(v)}
+              options={[
+                { value: "html", label: t("notesHtml") },
+                { value: "markdown", label: t("notesMarkdown") },
+              ]}
+            />
           </div>
           <div className="ez-field">
-            <label htmlFor="ez-settings-density">{t("defaultDensity")}</label>
-            <input
-              id="ez-settings-density"
-              className="ez-input"
-              type="number"
+            <NumberInput
+              label={t("defaultDensity")}
+              description={t("defaultDensityHint")}
               min={36}
               max={1200}
               step={1}
-              value={defaultDensity}
-              onChange={(e) => setDefaultDensity(e.target.value)}
+              hasClear
+              value={defaultDensity === "" ? null : Number(defaultDensity)}
+              onChange={(v) => setDefaultDensity(v == null ? "" : String(v))}
             />
-            <p className="ez-notice">{t("defaultDensityHint")}</p>
           </div>
           <div className="ez-field">
             <span className="ez-field-label">{t("omekaTitle")}</span>
             <p className="ez-notice">{t("omekaNote")}</p>
-            <label htmlFor="ez-settings-omeka-url">{t("omekaBaseUrl")}</label>
-            <input
-              id="ez-settings-omeka-url"
-              className="ez-input"
-              value={omekaBaseUrl}
-              onChange={(e) => setOmekaBaseUrl(e.target.value)}
-              placeholder="https://example.org/omeka-s"
-            />
-            <label htmlFor="ez-settings-omeka-id">{t("omekaKeyIdentity")}</label>
-            <input
-              id="ez-settings-omeka-id"
-              className="ez-input"
-              value={omekaIdentity}
-              onChange={(e) => setOmekaIdentity(e.target.value)}
-            />
-            <label htmlFor="ez-settings-omeka-cred">{t("omekaKeyCredential")}</label>
-            <input
-              id="ez-settings-omeka-cred"
-              className="ez-input"
-              type="password"
-              value={omekaCredential}
-              onChange={(e) => setOmekaCredential(e.target.value)}
-              autoComplete="off"
-            />
-            <p className="ez-notice">{t("omekaKeyCredentialHint")}</p>
+            <TextInput label={t("omekaBaseUrl")} value={omekaBaseUrl} onChange={(v) => setOmekaBaseUrl(v)} placeholder="https://example.org/omeka-s" />
+            <TextInput label={t("omekaKeyIdentity")} value={omekaIdentity} onChange={(v) => setOmekaIdentity(v)} />
+            <TextInput label={t("omekaKeyCredential")} type="password" value={omekaCredential} onChange={(v) => setOmekaCredential(v)} description={t("omekaKeyCredentialHint")} />
             <p className="ez-notice">{omekaStatus === "ok" ? t("omekaConfigured") : t("omekaNotConfigured")}</p>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button type="button" className="ez-btn ez-btn--sm" disabled={omekaBusy || !omekaBaseUrl.trim() || !omekaIdentity.trim()} onClick={saveOmeka}>
-                {t("omekaSave")}
-              </button>
-              <button type="button" className="ez-btn ez-btn--sm" disabled={omekaBusy || omekaStatus !== "ok"} onClick={pushProjectToOmeka}>
-                {omekaBusy ? t("omekaPushing") : t("omekaPushProject")}
-              </button>
+              <Button label={t("omekaSave")} size="sm" isDisabled={omekaBusy || !omekaBaseUrl.trim() || !omekaIdentity.trim()} onClick={saveOmeka} />
+              <Button label={omekaBusy ? t("omekaPushing") : t("omekaPushProject")} size="sm" isDisabled={omekaBusy || omekaStatus !== "ok"} isLoading={omekaBusy} onClick={pushProjectToOmeka} />
             </div>
             {omekaPushResult ? <p className="ez-notice">{omekaPushResult}</p> : null}
           </div>
           <div className="ez-field">
             <span className="ez-field-label">{t("tokensTitle")}</span>
             <p className="ez-notice">{t("tokensNote")}</p>
-            <label htmlFor="ez-settings-token-name">{t("tokenName")}</label>
-            <input
-              id="ez-settings-token-name"
-              className="ez-input"
-              value={tokenName}
-              onChange={(e) => setTokenName(e.target.value)}
-            />
-            <label style={{ fontSize: 12, display: "block" }}>
-              <input type="checkbox" checked={tokenRead} onChange={(e) => setTokenRead(e.target.checked)} style={{ marginRight: 4 }} />
-              {t("tokenScopeRead")}
-            </label>
-            <label style={{ fontSize: 12, display: "block" }}>
-              <input type="checkbox" checked={tokenWrite} onChange={(e) => setTokenWrite(e.target.checked)} style={{ marginRight: 4 }} />
-              {t("tokenScopeWrite")}
-            </label>
-            <button type="button" className="ez-btn ez-btn--sm" disabled={!tokenName.trim() || (!tokenRead && !tokenWrite)} onClick={createToken}>
-              {t("tokenCreate")}
-            </button>
+            <TextInput label={t("tokenName")} value={tokenName} onChange={(v) => setTokenName(v)} />
+            <CheckboxInput label={t("tokenScopeRead")} value={tokenRead} onChange={(checked) => setTokenRead(checked === true)} />
+            <CheckboxInput label={t("tokenScopeWrite")} value={tokenWrite} onChange={(checked) => setTokenWrite(checked === true)} />
+            <Button label={t("tokenCreate")} size="sm" isDisabled={!tokenName.trim() || (!tokenRead && !tokenWrite)} onClick={createToken} />
             {tokenSecret ? (
               <div style={{ marginTop: 8 }}>
                 <p className="ez-notice">{t("tokenSecretOnce")}</p>
-                <input className="ez-input" readOnly value={tokenSecret} onFocus={(e) => e.target.select()} style={{ fontFamily: "var(--font-mono)", fontSize: 11 }} />
+                <TextInput label={t("tokenName")} isLabelHidden isReadOnly value={tokenSecret} onChange={() => {}} />
               </div>
             ) : null}
             {tokens.length === 0 ? (
@@ -343,9 +287,7 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
                       {tk.revoked_at ? t("tokenRevoked") : tk.last_used_at ? t("tokenLastUsed", { date: new Date(tk.last_used_at).toLocaleDateString() }) : t("tokenNeverUsed")}
                     </span>
                     {!tk.revoked_at ? (
-                      <button type="button" className="ez-btn ez-btn--sm ez-btn--danger" onClick={() => revokeToken(tk.id)}>
-                        {t("tokenRevoke")}
-                      </button>
+                      <Button label={t("tokenRevoke")} size="sm" variant="destructive" onClick={() => revokeToken(tk.id)} />
                     ) : null}
                   </div>
                 ))}
@@ -364,40 +306,28 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
                 <span style={{ fontSize: 11, color: "var(--ink-3)", flex: 1 }}>
                   {tp(`${p.i18n_base}.description` as never)}
                 </span>
-                <label style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  <input
-                    type="checkbox"
-                    checked={p.enabled}
-                    onChange={(e) => void togglePlugin(p.id, e.target.checked)}
-                    aria-label={tp(`${p.i18n_base}.name` as never)}
-                  />
-                  {p.enabled ? tp("enabled") : tp("disabled")}
-                </label>
+                <CheckboxInput
+                  label={p.enabled ? tp("enabled") : tp("disabled")}
+                  value={p.enabled}
+                  onChange={(checked) => void togglePlugin(p.id, checked === true)}
+                />
               </div>
             ))}
           </div>
           <div className="ez-field">
             <span className="ez-field-label">{t("help")}</span>
-            <button
-              type="button"
-              className="ez-btn ez-btn--sm"
+            <Button
+              label={ts("takeTour")}
+              size="sm"
               onClick={() => {
                 setOpen(false);
                 startTour();
               }}
-            >
-              {ts("takeTour")}
-            </button>
+            />
           </div>
           <div className="ez-field">
             <span className="ez-field-label">{t("dangerZone")}</span>
-            <button
-              type="button"
-              className="ez-btn ez-btn--danger ez-btn--sm"
-              onClick={() => setDeleteEverythingOpen(true)}
-            >
-              {t("deleteEverything")}
-            </button>
+            <Button label={t("deleteEverything")} size="sm" variant="destructive" onClick={() => setDeleteEverythingOpen(true)} />
           </div>
         </>
       )}
