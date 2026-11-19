@@ -7,7 +7,11 @@
    with the EZVault theme (lib/theme/ezvault-theme.ts). */
 @import "@astryxdesign/core/reset.css";
 @import "@astryxdesign/core/astryx.css";
-@import "@astryxdesign/theme-neutral/theme.css";
+/* Production-built EZVault theme (astryx theme build, from
+   lib/theme/ezvault-theme.ts) — replaces the neutral theme stylesheet
+   and the runtime style injection of the unbuilt theme. Regenerate
+   with `npm run theme:build` after editing the theme source. */
+@import "../lib/theme/ezvault.css";
 
 /* EZVault design tokens — EZVault identity. Light = "Reading Room", dark = "Darkroom". */
 

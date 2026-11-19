@@ -112,9 +112,54 @@ Astryx-backed `Dialog` above.
 1. Owner play-test of the Settings dialog and a dialog/toast-heavy
    flow, light + dark, desktop + mobile widths (no browser check was
    run on this branch).
-2. `astryx theme build` production pass for the EZVault theme.
+2. ~~`astryx theme build` production pass for the EZVault theme.~~
+   DONE in the QA fix pass below.
 3. Map the remaining theme tokens listed above if the converted
    surfaces show mismatches.
 4. Then, in later passes: items Table and the import wizard
    (FileInput + Stepper fit the .tpy flow) behind the same
    adapter pattern.
+
+## QA fix pass (2026-11-19) — "fix everything"
+
+Full QA (~/workspace/your_files/ezvault-qa-2026-11-18/REPORT.md) found
+3 branch regressions + 7 pre-existing defects + 2 observations. All
+fixed on this branch; regression tests in test/qa-regressions.test.mjs
+(30 tests; suite 396/396); browser re-verification screenshots in the
+QA folder's fix-verification/.
+
+- D1: Esc now closes workspace dialogs — the global esc binding no
+  longer preventDefaults (native <dialog> cancel survives) and defers
+  to an open native dialog; closeTopmost() covers settings/retention/
+  templates/about layers.
+- D2: toast bridge no longer renders its own dismiss button (Astryx
+  Toast's built-in close is the single control).
+- D3: Settings plugin checkboxes are labelled with the plugin name
+  (visually hidden; the visible Enabled/Disabled text is separate).
+- D8: "?" opens the shortcuts overlay — bound as "shift+?, ?" with
+  useKey (react-hotkeys-hook v5 matches e.code, not the character,
+  unless useKey is set; both shift states bound for layout coverage).
+- D10: .tpy wizard crash (hooks after an early return) fixed, AND the
+  wizard's API contract aligned to the routes: presign sends
+  tpy_size/with_assets_zip and reads the grants array; analyze sends
+  project_id + staged_key and normalizes the camelCase report; the
+  run response's conflicts array is counted, `expected` defaults to
+  the report step's "?" fallback. (In the sandbox the flow then stops
+  only at the R2 staging PUT — egress proxy — as with photo uploads.)
+- D6: items list + project stats exclude trashed subjects (NOT EXISTS
+  against the trash table).
+- D7: Sidebar Trash click no longer resets the filter via
+  setActiveListId(null) — the trash view opens; restore/purge verified.
+- D9: TemplatesDialog .ttp import posts the parsed document (the
+  route's contract), not a {ttp, filename} wrapper.
+- D5: photoless items render an item-level metadata form in the
+  inspector instead of the photos ErrorCard (new inspector.noPhotos*
+  strings in all 11 locales; errors.retry likewise added for D4).
+- O1: bulk metadata apply sends replace: true (no more duplicates).
+- O2: single-item GET resolves title/cover like the list route.
+- Theme build: `npm run theme:build` output committed under
+  lib/theme/ (ezvault.css/.js + types); AstryxProviders consumes the
+  built theme and globals.css imports the built stylesheet instead of
+  theme-neutral's, so no styles are injected at hydration. Re-run
+  `npm run theme:build` after editing lib/theme/ezvault-theme.ts
+  (`npm run theme:check` verifies freshness).

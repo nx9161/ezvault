@@ -62,7 +62,9 @@
     "dev": "next dev",
     "prebuild": "bash scripts/secret-scan.sh && node scripts/verify-codecs.mjs && node scripts/check-licences.mjs",
     "start": "next start",
-    "test": "tsx --test test/*.test.mjs"
+    "test": "tsx --test test/*.test.mjs",
+    "theme:build": "astryx theme build lib/theme/ezvault-theme.ts",
+    "theme:check": "astryx theme build lib/theme/ezvault-theme.ts --check"
   },
   "version": "0.1.0"
 }
