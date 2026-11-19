@@ -20,6 +20,11 @@
  *       matches on e.code, so a bare "?" can never fire).
  *   D9  Template .ttp import posts the parsed document, not a wrapper.
  *   D10 TpyWizard: no early return before the last hook (React #310).
+ *   D11 Tpy photo md5 dedupe must exclude the photo's own row — the row
+ *       is inserted with tpy_checksum_md5 already set, so without the
+ *       exclusion every photo self-matches and is duplicate-skipped
+ *       (found 2026-11-19 by the D10 completion proof; pre-existing on
+ *       main, production-live).
  *   O1  Bulk metadata apply replaces values for the applied properties.
  *   O2  Single-item GET enriches the resolved title like the list GET.
  */
@@ -124,6 +129,13 @@ describe('D7 — sidebar Trash click keeps the trash filter', () => {
     const m = src.match(/aria-current=\{libraryFilter === "trash"\}[\s\S]{0,600}/);
     assert.ok(m, 'trash nav row found');
     assert.ok(!m[0].includes('setActiveListId(null);'), 'no filter reset call in trash onClick');
+  });
+});
+
+describe('D11 — tpy photo md5 dedupe excludes the photo itself', () => {
+  const src = read('lib/import/tpy.ts');
+  it('md5 dedupe query carries the self-exclusion (mirrors the sha256 pass)', () => {
+    assert.match(src, /p\.tpy_checksum_md5 = \$\{ph\.md5\} AND p\.subject_id != \$\{newId\}/);
   });
 });
 

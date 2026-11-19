@@ -923,7 +923,7 @@ async function importTpyPhotoAsset(
   // Duplicate detection: md5 first, then sha256 (phase2 §6.2.3).
   if (ph.md5 && opts.duplicatePolicy !== 'keep_both') {
     const dup = await sql()`SELECT p.subject_id FROM photos p JOIN subjects sb ON sb.id = p.subject_id
-      WHERE sb.project_id = ${projectId} AND p.tpy_checksum_md5 = ${ph.md5} LIMIT 1`;
+      WHERE sb.project_id = ${projectId} AND p.tpy_checksum_md5 = ${ph.md5} AND p.subject_id != ${newId} LIMIT 1`;
     if (dup.length) {
       if (opts.duplicatePolicy === 'skip') {
         await remapDuplicate(s.tpy_id, newId, dup[0].subject_id as string, `md5 ${ph.md5}`);
