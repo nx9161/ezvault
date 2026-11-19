@@ -362,7 +362,11 @@ export function bulkMetadataOp(
       ).then((r) => adaptMetadataValues(r.values));
       befores.set(sid, cur);
     }
-    await post(`/api/projects/${ctx.projectId}/metadata/bulk`, { subject_ids: subjectIds, values: metadataWire(values) }, { opId: opId });
+    // QA O1: "Apply to all" is a set operation — without replace, the
+    // route appends the applied values alongside each subject's existing
+    // ones (every item ended up with two title values). replace: true
+    // deletes the applied properties' prior values first, per subject.
+    await post(`/api/projects/${ctx.projectId}/metadata/bulk`, { subject_ids: subjectIds, values: metadataWire(values), replace: true }, { opId: opId });
   }, async (opId) => {
     if (!befores) return;
     for (const [sid, before] of befores) {

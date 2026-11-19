@@ -50,6 +50,18 @@ export interface HotkeyEntry {
   hint: string;
   /** run is absent for viewer entries (bound locally in PhotoViewer) */
   run?: (ctx: HotkeyContext) => void | Promise<void>;
+  /**
+   * react-hotkeys-hook preventDefault override (default: true in the
+   * binding). The Esc entry MUST set this false — preventDefault on the
+   * keydown suppresses the native <dialog> cancel event (QA D1).
+   */
+  preventDefault?: boolean;
+  /**
+   * Match on e.key instead of e.code (react-hotkeys-hook useKey). Needed
+   * for characters like "?" whose code ("Slash") carries no trace of the
+   * produced character (QA D8).
+   */
+  useKey?: boolean;
 }
 
 function closeTopmost() {
@@ -57,6 +69,13 @@ function closeTopmost() {
   if (ui.paletteOpen) ui.setPaletteOpen(false);
   else if (ui.csvImportOpen) ui.setCsvImportOpen(false);
   else if (ui.shortcutsOpen) ui.setShortcutsOpen(false);
+  // Dialog-adapter layers (Settings/Storage/Templates/About): normally
+  // closed by the native <dialog> cancel path (see the esc entry), this
+  // chain is the fallback if a flag is set without a live dialog element.
+  else if (ui.templatesOpen) ui.setTemplatesOpen(false);
+  else if (ui.settingsOpen) ui.setSettingsOpen(false);
+  else if (ui.retentionOpen) ui.setRetentionOpen(false);
+  else if (ui.aboutOpen) ui.setAboutOpen(false);
   else if (ui.importOpen) ui.setImportOpen(false);
   else if (ui.tpyOpen) ui.setTpyOpen(false);
   else if (ui.inspectorOpen) ui.setInspectorOpen(false);
@@ -67,7 +86,14 @@ export const HOTKEY_REGISTRY: HotkeyEntry[] = [
   // ---------- general ----------
   {
     id: "toggleShortcuts",
-    keys: "?",
+    // QA D8: a bare "?" can never fire under react-hotkeys-hook v5 — the
+    // matcher compares e.code ("Slash"), not the produced character.
+    // useKey matches e.key ("?") instead. Both shift states are bound:
+    // most layouts produce "?" as Shift+/, some produce it unshifted —
+    // either event must open the overlay (exactly one variant matches
+    // any given keydown, so it never fires twice).
+    keys: "shift+?, ?",
+    useKey: true,
     scope: "global",
     group: "general",
     labelKey: "shortcuts",
@@ -80,11 +106,26 @@ export const HOTKEY_REGISTRY: HotkeyEntry[] = [
   {
     id: "closeTopmost",
     keys: "esc",
+    // QA D1: never preventDefault Esc — doing so suppresses the native
+    // <dialog> cancel event the Astryx Dialog relies on, which is why
+    // Esc stopped closing workspace dialogs on the astryx-upgrade
+    // branch. When a native dialog is open it closes itself via cancel
+    // (Astryx propagates onClose); closeTopmost handles the remaining
+    // non-dialog layers (palette, overlays, drawers).
+    preventDefault: false,
     scope: "global",
     group: "general",
     labelKey: "escClose",
     hint: "Esc",
-    run: () => closeTopmost(),
+    run: () => {
+      if (
+        typeof document !== "undefined" &&
+        document.querySelector("dialog[open]")
+      ) {
+        return;
+      }
+      closeTopmost();
+    },
   },
   {
     id: "import",

@@ -102,7 +102,6 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
 
   const { data: runJob } = useJob(step === "run" ? runJobId : null);
 
-  if (!open) return null;
   const steps: Step[] = ["upload", "analyze", "map", "run", "report"];
   const stepIdx = steps.indexOf(step);
 
@@ -117,15 +116,24 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
     setStep("analyze");
     try {
       setProgress(t("analyzing"));
-      // 1. Presign staging PUTs (canonical TpyPresign shape).
+      // 1. Presign staging PUTs. QA D10 (contract): the route requires
+      // tpy_size and with_assets_zip, and answers with a grants array —
+      // the wizard previously sent {with_assets} and read tpy_grant /
+      // assets_grant fields that never exist, so every UI import failed
+      // at this step (400 "tpy_size is required"). Client aligned to
+      // the route's contract, as with D9.
       const presigned = await post<{
         job_id: string;
-        tpy_grant: { url: string; key: string };
-        assets_grant?: { url: string; key: string };
+        grants: { kind: string; key: string; url: string }[];
       }>("/api/import/tpy/presign", {
         project_id: projectId,
-        with_assets: !!assetsFile,
+        tpy_size: tpyFile.size,
+        tpy_filename: tpyFile.name,
+        with_assets_zip: !!assetsFile,
       });
+      const tpyGrant = presigned.grants.find((g) => g.kind === "tpy");
+      const assetsGrant = presigned.grants.find((g) => g.kind === "assets_zip");
+      if (!tpyGrant) throw new Error("presign returned no .tpy grant");
       setStagingJobId(presigned.job_id);
       // F-D: wire the upload byte progress into a determinate bar.
       const tpySize = tpyFile.size;
@@ -138,7 +146,7 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
       };
       setUploadPct(0);
       await putWithProgress(
-        presigned.tpy_grant.url,
+        tpyGrant.url,
         tpyFile,
         "application/x-sqlite3",
         (loaded) => {
@@ -146,9 +154,9 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
           reportUpload();
         },
       );
-      if (assetsFile && presigned.assets_grant) {
+      if (assetsFile && assetsGrant) {
         await putWithProgress(
-          presigned.assets_grant.url,
+          assetsGrant.url,
           assetsFile,
           assetsFile.type || "application/octet-stream",
           (loaded) => {
@@ -158,16 +166,39 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
         );
       }
       setUploadPct(null);
-      // 2. Register the staged files, then analyze (server-side single pass).
+      // 2. Register the staged files, then analyze (server-side single
+      // pass). Analyze requires project_id + staged_key alongside the
+      // job id, and answers in the API's camelCase report shape —
+      // normalize into the wizard's AnalyzeReport at this boundary.
+      // (application_id_ok has no server counterpart: analyze validates
+      // the file itself and fails the request on a bad database.)
       await post("/api/import/tpy/upload-complete", {
         job_id: presigned.job_id,
         project_id: projectId,
-        staged_key: presigned.tpy_grant.key,
-        assets_zip_key: presigned.assets_grant?.key,
+        staged_key: tpyGrant.key,
+        assets_zip_key: assetsGrant?.key,
       });
-      const analysis = await post<AnalyzeReport>("/api/import/tpy/analyze", {
+      const rawAnalysis = await post<{
+        job_id: string;
+        userVersion: number;
+        userVersionWarning: string | null;
+        counts: Record<string, number>;
+        templateUris: string[];
+        unknownTables: string[];
+      }>("/api/import/tpy/analyze", {
         job_id: presigned.job_id,
+        project_id: projectId,
+        staged_key: tpyGrant.key,
       });
+      const analysis: AnalyzeReport = {
+        job_id: rawAnalysis.job_id,
+        application_id_ok: true,
+        user_version: rawAnalysis.userVersion,
+        user_version_warning: rawAnalysis.userVersionWarning,
+        counts: rawAnalysis.counts,
+        template_uris: rawAnalysis.templateUris,
+        unknown_tables: rawAnalysis.unknownTables,
+      };
       setReport(analysis);
       const initialMap: Record<string, string> = {};
       for (const uri of analysis.template_uris) {
@@ -208,20 +239,36 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
       for (const [uri, target] of Object.entries(templateMap)) {
         template_map[uri] = target === "__create__" ? "create_new" : "use_existing";
       }
-      const rep = await post<RunReport & { job_id: string }>("/api/import/tpy/run", {
+      // QA D10 (contract): the run route answers TpyRunResult —
+      // conflicts is an ARRAY and there is no `expected` map. Normalize
+      // at the boundary: the report step shows the conflict count and
+      // "?" for expected (its existing fallback for unknown counts).
+      const rawRep = await post<{
+        job_id: string;
+        imported: Record<string, number>;
+        conflicts: { tpy_id: number | string; kind: string; reason: string }[];
+        done: boolean;
+        missing_originals?: { filename: string; photo_subject_id: string }[];
+      }>("/api/import/tpy/run", {
         job_id: stagingJobId,
         project_id: projectId,
         mode: projectKind ?? (assetsFile ? "standard" : "advanced"),
         duplicate_policy: conflictPolicy === "skip" ? "skip" : conflictPolicy === "copy" ? "keep_both" : "skip",
         template_map,
       });
+      const rep: RunReport & { job_id: string } = {
+        job_id: rawRep.job_id,
+        imported: rawRep.imported,
+        expected: {},
+        conflicts: rawRep.conflicts.length,
+        done: rawRep.done,
+      };
       setRunJobId(rep.job_id);
-      // TpyRunResponse carries imported/expected/conflicts — that IS the report.
       setRunReport(rep);
       // The run POST already emits missing_originals; the useJob GET does NOT
       // return the report, so seed the re-link list here directly (W2-D).
       setMissing(
-        ((rep as { missing_originals?: { filename: string; photo_subject_id: string }[] }).missing_originals ?? []).map((m) => ({
+        (rawRep.missing_originals ?? []).map((m) => ({
           filename: m.filename,
           photo_subject_id: m.photo_subject_id,
         })),
@@ -331,6 +378,12 @@ export default function TpyWizard({ projectId }: { projectId: string }) {
       setHashProgress(null);
     }
   }
+
+  // QA D10: this early return must stay AFTER every hook call above
+  // (useState/useRef/useJob/useEffect). It previously sat right after
+  // useJob, so opening the wizard rendered more hooks than the closed
+  // render and React threw #310, crashing the whole app.
+  if (!open) return null;
 
   return (
     <Dialog title={t("title")} onClose={() => setOpen(false)} wide>

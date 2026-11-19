@@ -23,7 +23,12 @@ function BoundHotkey({ entry, ctx }: { entry: HotkeyEntry; ctx: HotkeyContext })
       // inputs, contenteditables, and the TipTap editor (.ProseMirror).
       enableOnFormTags: false,
       enableOnContentEditable: false,
-      preventDefault: true,
+      // Per-entry overrides (QA D1/D8): Esc must not preventDefault (it
+      // would suppress the native <dialog> cancel), and "?" needs
+      // useKey matching. Both default to the safe values for all other
+      // entries.
+      preventDefault: entry.preventDefault ?? true,
+      useKey: entry.useKey ?? false,
     },
   );
   return null;

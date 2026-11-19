@@ -212,7 +212,18 @@ export default function TemplatesDialog({ projectId }: { projectId: string }) {
   async function importTtp(file: File) {
     const text = await file.text();
     try {
-      await post(`/api/projects/${projectId}/templates/import`, { ttp: text, filename: file.name });
+      // QA D9: the import route's contract is the raw .ttp document as
+      // the JSON body (validateTtp reads doc.name/doc.fields). This
+      // client used to wrap it in { ttp, filename }, so every UI import
+      // failed 400 with ".ttp name is required". Post the parsed
+      // document itself, matching the route and its API consumers.
+      let doc: unknown;
+      try {
+        doc = JSON.parse(text);
+      } catch {
+        throw new Error(`${file.name} is not a valid .ttp file (not JSON)`);
+      }
+      await post(`/api/projects/${projectId}/templates/import`, doc);
       await mutateTemplates();
     } catch (err) {
       pushToast({ message: err instanceof Error ? err.message : "import failed", kind: "error" });

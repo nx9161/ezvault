@@ -39,7 +39,15 @@ export const GET = handle(async (req: Request, ctx: Ctx) => {
   const params: unknown[] = [id];
   let p = 1;
   const joins: string[] = [];
-  const filters: string[] = [`s.project_id = $${p++}`, `s.kind = 'item'`];
+  const filters: string[] = [
+    `s.project_id = $${p++}`,
+    `s.kind = 'item'`,
+    // QA D6: trashed items must not surface in All Items (or in search
+    // via the q path below, which shares this filter set). Trashing
+    // writes a `trash` row; the list never excluded them, so trashed
+    // items stayed visible and counted after a reload.
+    `NOT EXISTS (SELECT 1 FROM trash tr WHERE tr.subject_id = s.id)`,
+  ];
   if (listId) {
     joins.push(`JOIN list_items li ON li.item_id = s.id AND li.list_id = $${p}`);
     params.push(listId);

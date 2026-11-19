@@ -111,6 +111,7 @@
   },
   "errors": {
     "loadFailed": "No se pudo cargar {what}.",
+    "retry": "Reintentar",
     "network": "Error de red. Comprueba tu conexión y reinténtalo.",
     "reportDownload": "Descargar informe de error",
     "saveFailed": "No se pudo guardar. Tu cambio se conservó localmente: reinténtalo.",
@@ -188,6 +189,8 @@
     "emptyBody": "Haz clic en un elemento de la cuadrícula o pulsa ? para ver todos los atajos.",
     "emptyTitle": "Selecciona un elemento para inspeccionarlo",
     "exportPhoto": "Exportar foto",
+    "noPhotosTitle": "Aún no hay fotos",
+    "noPhotosBody": "Este elemento no tiene fotos. Sus metadatos aún se pueden editar aquí; las notas y selecciones se adjuntan a las fotos.",
     "tabs": {
       "metadata": "Metadatos",
       "notes": "Notas",

@@ -104,7 +104,6 @@ function LibrarySection({ projectId }: { projectId: string }) {
   const t = useTranslations("sidebar");
   const libraryFilter = useUiStore((s) => s.libraryFilter);
   const setLibraryFilter = useUiStore((s) => s.setLibraryFilter);
-  const setActiveListId = useUiStore((s) => s.setActiveListId);
   const { data: trashData } = useTrash(projectId);
   const trash = trashData?.items;
   return (
@@ -130,10 +129,11 @@ function LibrarySection({ projectId }: { projectId: string }) {
         type="button"
         className="ez-nav-row"
         aria-current={libraryFilter === "trash"}
-        onClick={() => {
-          setLibraryFilter("trash");
-          setActiveListId(null);
-        }}
+        // QA D7: setLibraryFilter already clears the active list (and
+        // tags/search). Calling setActiveListId(null) here undid the
+        // filter — its setter forces libraryFilter back to "all" — which
+        // made the Trash view unreachable.
+        onClick={() => setLibraryFilter("trash")}
       >
         <TrashIcon size={15} /> {t("trash")}
         {trash && trash.length > 0 ? (

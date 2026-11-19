@@ -111,6 +111,7 @@
   },
   "errors": {
     "loadFailed": "{what} konnte nicht geladen werden.",
+    "retry": "Erneut versuchen",
     "network": "Netzwerkfehler. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
     "reportDownload": "Fehlerbericht herunterladen",
     "saveFailed": "Speichern nicht möglich. Ihre Änderung wurde lokal behalten — erneut versuchen.",
@@ -188,6 +189,8 @@
     "emptyBody": "Klicken Sie ein Element in der Übersicht oder drücken Sie ?, um alle Tastaturkürzel zu sehen.",
     "emptyTitle": "Element zum Prüfen auswählen",
     "exportPhoto": "Foto exportieren",
+    "noPhotosTitle": "Noch keine Fotos",
+    "noPhotosBody": "Dieses Element hat keine Fotos. Seine Metadaten können hier weiterhin bearbeitet werden; Notizen und Auswahlen werden an Fotos angehängt.",
     "tabs": {
       "metadata": "Metadaten",
       "notes": "Notizen",

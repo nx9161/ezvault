@@ -111,6 +111,7 @@
   },
   "errors": {
     "loadFailed": "Não foi possível carregar {what}.",
+    "retry": "Tentar novamente",
     "network": "Erro de rede. Verifique a ligação e tente novamente.",
     "reportDownload": "Transferir relatório de erro",
     "saveFailed": "Não foi possível guardar. A sua alteração ficou guardada localmente: tente novamente.",
@@ -188,6 +189,8 @@
     "emptyBody": "Clique num item da grelha ou prima ? para ver todos os atalhos.",
     "emptyTitle": "Selecione um item para inspecionar",
     "exportPhoto": "Exportar foto",
+    "noPhotosTitle": "Ainda sem fotos",
+    "noPhotosBody": "Este item não tem fotos. Seus metadados ainda podem ser editados aqui; notas e seleções são anexadas às fotos.",
     "tabs": {
       "metadata": "Metadados",
       "notes": "Notas",

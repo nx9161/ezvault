@@ -17,10 +17,8 @@ import { useEffect, useRef } from "react";
 import { ToastViewport, useToast } from "@astryxdesign/core/Toast";
 import { Button } from "@astryxdesign/core/Button";
 import { useUiStore } from "@/lib/store/ui";
-import { useTranslations } from "next-intl";
 
 function ToastBridge() {
-  const t = useTranslations("app");
   const showToast = useToast();
   const toasts = useUiStore((s) => s.toasts);
   const dismissToast = useUiStore((s) => s.dismissToast);
@@ -37,29 +35,20 @@ function ToastBridge() {
         type: toast.kind === "error" ? "error" : "info",
         isAutoHide: toast.kind !== "error",
         autoHideDuration: 6000,
-        endContent: (
-          <>
-            {toast.actionLabel ? (
-              <Button
-                label={toast.actionLabel}
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  toast.onAction?.();
-                  dismissToast(toast.id);
-                }}
-              />
-            ) : null}
-            <Button
-              label={t("dismiss")}
-              variant="ghost"
-              size="sm"
-              isIconOnly
-              icon={<span aria-hidden="true">✕</span>}
-              onClick={() => dismissToast(toast.id)}
-            />
-          </>
-        ),
+        // QA D2: no dismiss button here — Astryx Toast renders its own
+        // built-in close control; adding the bridge's own produced two
+        // ✕ buttons per toast. Only the optional action rides endContent.
+        endContent: toast.actionLabel ? (
+          <Button
+            label={toast.actionLabel}
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              toast.onAction?.();
+              dismissToast(toast.id);
+            }}
+          />
+        ) : undefined,
         onHide: () => {
           shown.current.delete(toast.id);
           dismissToast(toast.id);
@@ -74,7 +63,7 @@ function ToastBridge() {
         dismiss();
       }
     }
-  }, [toasts, showToast, dismissToast, t]);
+  }, [toasts, showToast, dismissToast]);
 
   return null;
 }

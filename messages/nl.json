@@ -111,6 +111,7 @@
   },
   "errors": {
     "loadFailed": "{what} kon niet laden.",
+    "retry": "Opnieuw proberen",
     "network": "Netwerkfout. Controleer je verbinding en probeer opnieuw.",
     "reportDownload": "Foutrapport downloaden",
     "saveFailed": "Opslaan mislukt. Je wijziging is lokaal bewaard — probeer opnieuw.",
@@ -188,6 +189,8 @@
     "emptyBody": "Klik op een item in het raster, of druk op ? om elke sneltoets te zien.",
     "emptyTitle": "Selecteer een item om te inspecteren",
     "exportPhoto": "Foto exporteren",
+    "noPhotosTitle": "Nog geen foto's",
+    "noPhotosBody": "Dit item heeft geen foto's. De metadata kan hier nog steeds worden bewerkt; notities en selecties worden aan foto's gekoppeld.",
     "tabs": {
       "metadata": "Metadata",
       "notes": "Notities",

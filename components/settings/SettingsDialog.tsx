@@ -306,11 +306,20 @@ export default function SettingsDialog({ projectId }: { projectId: string }) {
                 <span style={{ fontSize: 11, color: "var(--ink-3)", flex: 1 }}>
                   {tp(`${p.i18n_base}.description` as never)}
                 </span>
-                <CheckboxInput
-                  label={p.enabled ? tp("enabled") : tp("disabled")}
-                  value={p.enabled}
-                  onChange={(checked) => void togglePlugin(p.id, checked === true)}
-                />
+                {/* QA D3: the accessible name must be the plugin name
+                    (as on main, aria-label={plugin name}) — labelling
+                    every toggle "Enabled" made all 9 indistinguishable
+                    to assistive tech. The visible Enabled/Disabled state
+                    text rides beside the checkbox instead. */}
+                <span style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <CheckboxInput
+                    label={tp(`${p.i18n_base}.name` as never)}
+                    isLabelHidden
+                    value={p.enabled}
+                    onChange={(checked) => void togglePlugin(p.id, checked === true)}
+                  />
+                  {p.enabled ? tp("enabled") : tp("disabled")}
+                </span>
               </div>
             ))}
           </div>

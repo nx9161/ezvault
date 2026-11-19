@@ -17,7 +17,7 @@ export const GET = handle(async (_req: Request, ctx: Ctx) => {
   };
   const counts = await sql()`
     SELECT
-      (SELECT COUNT(*)::int FROM subjects s JOIN items i ON i.subject_id = s.id WHERE s.project_id = ${id}) AS items,
+      (SELECT COUNT(*)::int FROM subjects s JOIN items i ON i.subject_id = s.id WHERE s.project_id = ${id} AND NOT EXISTS (SELECT 1 FROM trash tr WHERE tr.subject_id = s.id)) AS items,
       (SELECT COUNT(*)::int FROM subjects s JOIN photos p ON p.subject_id = s.id WHERE s.project_id = ${id}) AS photos,
       (SELECT COUNT(*)::int FROM subjects s JOIN selections sel ON sel.subject_id = s.id WHERE s.project_id = ${id}) AS selections,
       (SELECT COUNT(*)::int FROM notes n JOIN subjects s ON s.id = n.subject_id WHERE s.project_id = ${id} AND n.deleted_at IS NULL) AS notes,

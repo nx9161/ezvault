@@ -111,6 +111,7 @@
   },
   "errors": {
     "loadFailed": "Couldn’t load {what}.",
+    "retry": "Retry",
     "network": "Network error. Check your connection and retry.",
     "reportDownload": "Download error report",
     "saveFailed": "Couldn’t save. Your change was kept locally — retry.",
@@ -190,6 +191,8 @@
     "emptyBody": "Click an item in the grid, or press ? to see every shortcut.",
     "emptyTitle": "Select an item to inspect",
     "exportPhoto": "Export photo",
+    "noPhotosTitle": "No photos yet",
+    "noPhotosBody": "This item has no photos. Its metadata is still editable here; notes and selections attach to photos.",
     "tabs": {
       "metadata": "Metadata",
       "notes": "Notes",

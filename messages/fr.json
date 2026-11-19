@@ -111,6 +111,7 @@
   },
   "errors": {
     "loadFailed": "Impossible de charger {what}.",
+    "retry": "Réessayer",
     "network": "Erreur réseau. Vérifiez votre connexion et réessayez.",
     "reportDownload": "Télécharger le rapport d'erreur",
     "saveFailed": "Enregistrement impossible. Votre modification est conservée localement — réessayez.",
@@ -188,6 +189,8 @@
     "emptyBody": "Cliquez sur un élément de la grille, ou appuyez sur ? pour voir tous les raccourcis.",
     "emptyTitle": "Sélectionnez un élément à inspecter",
     "exportPhoto": "Exporter la photo",
+    "noPhotosTitle": "Aucune photo pour le moment",
+    "noPhotosBody": "Cet élément n'a aucune photo. Ses métadonnées restent modifiables ici ; les notes et les sélections s'attachent aux photos.",
     "tabs": {
       "metadata": "Métadonnées",
       "notes": "Notes",

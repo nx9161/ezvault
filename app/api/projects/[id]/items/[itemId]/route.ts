@@ -2,6 +2,7 @@
 import { handle, ok, parseJson, requireProject, HttpError } from '@/lib/api/route-utils';
 import { sql, tx, bumpRevQuery } from '@/lib/db/index';
 import { trashSubject } from '@/lib/api/shapes';
+import { resolveItemTitles, resolveItemCovers } from '@/lib/api/item-enrichment';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -25,7 +26,21 @@ export const GET = handle(async (req: Request, ctx: Ctx) => {
     FROM subjects s JOIN items i ON i.subject_id = s.id
     WHERE s.project_id = ${id} AND s.id = ${itemId}`;
   if (!rows.length) throw new HttpError(404, 'not_found', 'item not found');
-  return ok(rows[0]);
+  // QA O2: enrich exactly like the list GET — without this the single
+  // item carried no resolved title, so search-hit cards and the command
+  // palette (which resolve hits through this route) rendered titled
+  // items as "Untitled".
+  const row = rows[0] as Record<string, unknown>;
+  const [titles, covers] = await Promise.all([
+    resolveItemTitles([itemId]),
+    resolveItemCovers([itemId]),
+  ]);
+  return ok({
+    ...row,
+    title: titles.get(itemId) ?? null,
+    cover_image_id:
+      (row['cover_image_id'] as string | null) ?? covers.get(itemId) ?? null,
+  });
 });
 
 export const PATCH = handle(async (req: Request, ctx: Ctx) => {

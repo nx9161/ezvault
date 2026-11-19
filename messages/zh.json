@@ -111,6 +111,7 @@
   },
   "errors": {
     "loadFailed": "无法加载{what}。",
+    "retry": "重试",
     "network": "网络错误。请检查连接并重试。",
     "reportDownload": "下载错误报告",
     "saveFailed": "无法保存。您的更改已保留在本地，请重试。",
@@ -188,6 +189,8 @@
     "emptyBody": "单击网格中的条目，或按 ? 查看所有快捷键。",
     "emptyTitle": "选择一个条目进行查看",
     "exportPhoto": "导出照片",
+    "noPhotosTitle": "暂无照片",
+    "noPhotosBody": "此条目暂无照片。其元数据仍可在此编辑；备注和选区会附加到照片上。",
     "tabs": {
       "metadata": "元数据",
       "notes": "笔记",

@@ -171,11 +171,85 @@ function SingleItemInspector({ projectId, itemId }: { projectId: string; itemId:
       </div>
     );
   }
-  if (photosError || !photo) {
+  if (photosError) {
     return (
       <div className="ez-inspector-body">
         <ErrorCard what="photos" onRetry={() => mutatePhotos()} />
       </div>
+    );
+  }
+  if (!photo) {
+    // QA D5: a photoless item is NOT a photos error — the photos
+    // request succeeded with an empty list. This branch used to render
+    // the same ErrorCard ("Couldn't load photos"), dead-ending the
+    // item: its metadata was unreachable in the single-item inspector.
+    // Item-level metadata stays editable here (subjectKind "item", the
+    // same form the bulk inspector uses); notes and selections attach
+    // to photos, so those tabs explain instead of pretending to load.
+    return (
+      <>
+        <div className="ez-inspector-head">
+          <div className="ez-inspector-breadcrumb">
+            <span>{item?.title ?? "…"}</span>
+            <span style={{ flex: 1 }} />
+            <button
+              type="button"
+              className="ez-icon-btn"
+              onClick={async () => {
+                await runCommand(ctx, trashSubjectsOp(ctx, [itemId], "user", t("trashItem")), ["items", "trash", "meter"]);
+                setActiveItemId(null);
+                setSelectedIds([]);
+              }}
+              aria-label={t("trashItem")}
+              title={t("trashItem")}
+            >
+              <TrashIcon size={15} />
+            </button>
+            <button
+              type="button"
+              className="ez-icon-btn"
+              onClick={() => {
+                setActiveItemId(null);
+              }}
+              aria-label={t("closeInspector")}
+            >
+              <CloseIcon size={14} />
+            </button>
+          </div>
+          <div className="ez-tabs" role="tablist" aria-label={t("paneLabel")}>
+            {TABS.map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={inspectorTab === tab}
+                className="ez-tab"
+                onClick={() => setInspectorTab(tab)}
+              >
+                {t(`tabs.${tab}`)}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="ez-inspector-body">
+          {inspectorTab === "metadata" ? (
+            <MetadataForm
+              projectId={projectId}
+              subjectId={itemId}
+              templateId={item?.template_id ?? null}
+              subjectKind="item"
+              subjectRoute={`/api/projects/${projectId}/items/${itemId}`}
+              ctx={ctx}
+            />
+          ) : (
+            <div className="ez-state">
+              <EmptyArt variant="inspector" />
+              <h2>{t("noPhotosTitle")}</h2>
+              <p>{t("noPhotosBody")}</p>
+            </div>
+          )}
+        </div>
+      </>
     );
   }
 
